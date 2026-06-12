@@ -35,6 +35,10 @@ You have a few options to get started:
    - For local development and customization, 
    - see our [beginner's guide for running locally](docs/how_to_run_beginners.md). 
    - Use this for the most cost-optimal & private setup.
+- **Run on Unraid**:
+   - Self-host on your Unraid server with the included Docker template,
+   - see the [Unraid deployment guide](docs/how_to_run_unraid.md).
+   - Use this for a private, always-on setup on hardware you own.
 - **[Join The Preview Server](https://podly.up.railway.app/)**: 
    - pay what you want (limited sign ups available)
 

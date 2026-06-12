@@ -142,9 +142,17 @@ export const feedsApi = {
 
   updateFeedSettings: async (
     feedId: number,
-    settings: { auto_whitelist_new_episodes_override: boolean | null }
+    settings: { auto_whitelist_new_episodes_override?: boolean | null; episode_retention_count?: number | null }
   ): Promise<Feed> => {
     const response = await api.patch(`/api/feeds/${feedId}/settings`, settings);
+    return response.data;
+  },
+
+  bulkUpdateFeedSettings: async (
+    feedIds: number[],
+    settings: { auto_whitelist_new_episodes_override?: boolean | null; episode_retention_count?: number | null }
+  ): Promise<{ updated: number }> => {
+    const response = await api.patch('/api/feeds/bulk-settings', { feed_ids: feedIds, ...settings });
     return response.data;
   },
 

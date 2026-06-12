@@ -476,11 +476,12 @@ def update_feed_settings_endpoint(feed_id: int) -> ResponseReturnValue:
         return error_response
 
     payload = request.get_json(silent=True) or {}
-    if "auto_whitelist_new_episodes_override" not in payload:
+    known_fields = {"auto_whitelist_new_episodes_override", "episode_retention_count"}
+    if not known_fields.intersection(payload.keys()):
         return jsonify({"error": "No settings provided."}), 400
 
     override = payload.get("auto_whitelist_new_episodes_override")
-    if override is not None and not isinstance(override, bool):
+    if "auto_whitelist_new_episodes_override" in payload and override is not None and not isinstance(override, bool):
         return (
             jsonify(
                 {
@@ -490,11 +491,18 @@ def update_feed_settings_endpoint(feed_id: int) -> ResponseReturnValue:
             400,
         )
 
-    result = writer_client.action(
-        "update_feed_settings",
-        {"feed_id": feed_id, "auto_whitelist_new_episodes_override": override},
-        wait=True,
-    )
+    retention = payload.get("episode_retention_count")
+    if "episode_retention_count" in payload and retention is not None:
+        if not isinstance(retention, int) or retention < 1:
+            return jsonify({"error": "episode_retention_count must be a positive integer or null."}), 400
+
+    action_params: dict = {"feed_id": feed_id}
+    if "auto_whitelist_new_episodes_override" in payload:
+        action_params["auto_whitelist_new_episodes_override"] = override
+    if "episode_retention_count" in payload:
+        action_params["episode_retention_count"] = retention
+
+    result = writer_client.action("update_feed_settings", action_params, wait=True)
     if result is None or not result.success:
         return (
             jsonify({"error": getattr(result, "error", "Failed to update feed")}),
@@ -506,6 +514,42 @@ def update_feed_settings_endpoint(feed_id: int) -> ResponseReturnValue:
         return jsonify({"error": "Feed not found"}), 404
 
     return jsonify(_serialize_feed(feed, current_user=getattr(g, "current_user", None)))
+
+
+@feed_bp.route("/api/feeds/bulk-settings", methods=["PATCH"])
+def bulk_update_feed_settings_endpoint() -> ResponseReturnValue:
+    _, error_response = require_admin("bulk update feed settings")
+    if error_response is not None:
+        return error_response
+
+    payload = request.get_json(silent=True) or {}
+    feed_ids = payload.get("feed_ids")
+    if not feed_ids or not isinstance(feed_ids, list):
+        return jsonify({"error": "feed_ids must be a non-empty list."}), 400
+
+    known_fields = {"auto_whitelist_new_episodes_override", "episode_retention_count"}
+    if not known_fields.intersection(payload.keys()):
+        return jsonify({"error": "No settings provided."}), 400
+
+    action_params: dict = {"feed_ids": feed_ids}
+
+    if "auto_whitelist_new_episodes_override" in payload:
+        override = payload.get("auto_whitelist_new_episodes_override")
+        if override is not None and not isinstance(override, bool):
+            return jsonify({"error": "auto_whitelist_new_episodes_override must be a boolean or null."}), 400
+        action_params["auto_whitelist_new_episodes_override"] = override
+
+    if "episode_retention_count" in payload:
+        retention = payload.get("episode_retention_count")
+        if retention is not None and (not isinstance(retention, int) or retention < 1):
+            return jsonify({"error": "episode_retention_count must be a positive integer or null."}), 400
+        action_params["episode_retention_count"] = retention
+
+    result = writer_client.action("bulk_update_feed_settings", action_params, wait=True)
+    if result is None or not result.success:
+        return jsonify({"error": getattr(result, "error", "Failed to update feeds")}), 500
+
+    return jsonify({"updated": getattr(result, "data", {}).get("updated", 0)})
 
 
 def _refresh_feed_background(app: Flask, feed_id: int) -> None:
@@ -937,6 +981,7 @@ def _serialize_feed(
         "auto_whitelist_new_episodes_override": getattr(
             feed, "auto_whitelist_new_episodes_override", None
         ),
+        "episode_retention_count": getattr(feed, "episode_retention_count", None),
         "posts_count": len(feed.posts),
         "member_count": len(member_ids),
         "is_member": is_member,

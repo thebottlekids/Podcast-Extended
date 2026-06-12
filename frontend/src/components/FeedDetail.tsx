@@ -121,6 +121,10 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
     },
   });
 
+  const [retentionInput, setRetentionInput] = useState<string>(
+    currentFeed.episode_retention_count != null ? String(currentFeed.episode_retention_count) : ''
+  );
+
   const updateFeedSettingsMutation = useMutation({
     mutationFn: (override: boolean | null) =>
       feedsApi.updateFeedSettings(currentFeed.id, {
@@ -146,6 +150,29 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
       toast.error('Failed to update feed settings');
     },
   });
+
+  const updateRetentionMutation = useMutation({
+    mutationFn: (count: number | null) =>
+      feedsApi.updateFeedSettings(currentFeed.id, { episode_retention_count: count }),
+    onSuccess: (data) => {
+      setCurrentFeed(data);
+      queryClient.invalidateQueries({ queryKey: ['feeds'] });
+      toast.success('Episode retention updated');
+    },
+    onError: () => {
+      toast.error('Failed to update episode retention');
+    },
+  });
+
+  const handleRetentionSave = () => {
+    const trimmed = retentionInput.trim();
+    if (trimmed === '') {
+      updateRetentionMutation.mutate(null);
+    } else {
+      const n = parseInt(trimmed, 10);
+      if (!isNaN(n) && n > 0) updateRetentionMutation.mutate(n);
+    }
+  };
 
   const deleteFeedMutation = useMutation({
     mutationFn: () => feedsApi.deleteFeed(currentFeed.id),
@@ -748,6 +775,7 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
             )}
 
             {isAdmin && (
+              <>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <div className="flex flex-col gap-2">
                   <div>
@@ -774,6 +802,39 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
                   </select>
                 </div>
               </div>
+
+              {/* Episode Retention Count */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="flex flex-col gap-2">
+                  <div>
+                    <label className="text-sm font-medium text-gray-900">
+                      Episode retention limit
+                    </label>
+                    <p className="text-xs text-gray-600">
+                      Keep only the N most recent processed episodes. Leave blank to disable per-feed limit.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      placeholder="e.g. 10"
+                      value={retentionInput}
+                      onChange={(e) => setRetentionInput(e.target.value)}
+                      disabled={updateRetentionMutation.isPending}
+                      className="text-sm border border-gray-300 rounded-md px-3 py-2 bg-white w-28 disabled:opacity-60"
+                    />
+                    <button
+                      onClick={handleRetentionSave}
+                      disabled={updateRetentionMutation.isPending}
+                      className="px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+              </>
             )}
           </div>
         </div>

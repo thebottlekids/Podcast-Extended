@@ -15,6 +15,7 @@ from .cleanup import (
     clear_post_processing_data_action as clear_post_processing_data_action,
 )
 from .feeds import add_feed_action as add_feed_action
+from .feeds import bulk_update_feed_settings_action as bulk_update_feed_settings_action
 from .feeds import create_dev_test_feed_action as create_dev_test_feed_action
 from .feeds import create_feed_access_token_action as create_feed_access_token_action
 from .feeds import delete_feed_cascade_action as delete_feed_cascade_action

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Query
 
 from app.db_guard import db_guard, reset_session
 from app.extensions import db, scheduler
-from app.models import Post, ProcessingJob
+from app.models import Feed, Post, ProcessingJob
 from app.runtime_config import config as runtime_config
 from app.writer.client import writer_client
 from shared import defaults as DEFAULTS
@@ -116,6 +116,65 @@ def cleanup_processed_posts(retention_days: Optional[int]) -> int:
         return removed_posts
 
 
+def cleanup_posts_by_feed_retention_count() -> int:
+    """Remove processed audio for posts beyond each feed's per-feed episode_retention_count.
+
+    For each feed with episode_retention_count set, keep only the N most recent
+    whitelisted episodes (by release_date) and clean up processed audio for the rest.
+    Returns total number of posts cleaned across all feeds.
+    """
+    total_cleaned = 0
+
+    with db_guard("cleanup_posts_by_feed_retention_count", db.session, logger):
+        feeds = Feed.query.filter(Feed.episode_retention_count.isnot(None)).all()
+
+        for feed in feeds:
+            limit = feed.episode_retention_count
+            if not limit or limit <= 0:
+                continue
+
+            active_jobs_exists = (
+                db.session.query(ProcessingJob.id)
+                .filter(ProcessingJob.post_guid == Post.guid)
+                .filter(ProcessingJob.status.in_(["pending", "running"]))
+                .exists()
+            )
+
+            posts_with_audio = (
+                Post.query.filter_by(feed_id=feed.id)
+                .filter(Post.processed_audio_path.isnot(None))
+                .filter(~active_jobs_exists)
+                .order_by(Post.release_date.desc().nullslast(), Post.id.desc())
+                .all()
+            )
+
+            # Keep the N most recent, clean up the rest
+            to_clean = posts_with_audio[limit:]
+            for post in to_clean:
+                logger.info(
+                    "Feed retention cleanup: removing post '%s' (feed_id=%s, limit=%s)",
+                    post.title,
+                    feed.id,
+                    limit,
+                )
+                _remove_associated_files(post)
+                try:
+                    writer_client.action(
+                        "cleanup_processed_post", {"post_id": post.id}, wait=True
+                    )
+                    total_cleaned += 1
+                except Exception as exc:  # pylint: disable=broad-except
+                    logger.error(
+                        "Feed retention cleanup failed for post %s: %s",
+                        post.id,
+                        exc,
+                        exc_info=True,
+                    )
+
+    logger.info("Feed retention cleanup removed %s posts", total_cleaned)
+    return total_cleaned
+
+
 def scheduled_cleanup_processed_posts() -> None:
     """Entry-point for APScheduler."""
     retention = getattr(
@@ -130,6 +189,7 @@ def scheduled_cleanup_processed_posts() -> None:
     try:
         with scheduler.app.app_context():
             cleanup_processed_posts(retention)
+            cleanup_posts_by_feed_retention_count()
     except Exception as exc:  # pylint: disable=broad-except
         logger.error("Scheduled cleanup failed: %s", exc, exc_info=True)
         reset_session(db.session, logger, "scheduled_cleanup_processed_posts", exc)

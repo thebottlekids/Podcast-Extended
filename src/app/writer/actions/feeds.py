@@ -120,8 +120,35 @@ def update_feed_settings_action(params: Dict[str, Any]) -> Dict[str, Any]:
             "auto_whitelist_new_episodes_override"
         )
 
+    if "episode_retention_count" in params:
+        val = params.get("episode_retention_count")
+        feed.episode_retention_count = int(val) if val is not None else None
+
     db.session.flush()
     return {"feed_id": feed.id}
+
+
+def bulk_update_feed_settings_action(params: Dict[str, Any]) -> Dict[str, Any]:
+    feed_ids = params.get("feed_ids", [])
+    if not feed_ids:
+        raise ValueError("feed_ids is required")
+
+    updated = 0
+    for feed_id in feed_ids:
+        feed = db.session.get(Feed, int(feed_id))
+        if not feed:
+            continue
+        if "auto_whitelist_new_episodes_override" in params:
+            feed.auto_whitelist_new_episodes_override = params.get(
+                "auto_whitelist_new_episodes_override"
+            )
+        if "episode_retention_count" in params:
+            val = params.get("episode_retention_count")
+            feed.episode_retention_count = int(val) if val is not None else None
+        updated += 1
+
+    db.session.flush()
+    return {"updated": updated}
 
 
 def increment_download_count_action(params: Dict[str, Any]) -> Dict[str, Any]:

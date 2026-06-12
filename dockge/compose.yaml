@@ -1,0 +1,50 @@
+# Dockge stack for Podcast-Extended
+#
+# Usage in Dockge:
+#   1. Create a new stack named "podcast-extended".
+#   2. Paste this file as the stack's compose.yaml.
+#   3. Fill in the .env values (Dockge has an editor for it) — see .env.example.
+#   4. Deploy.
+#
+# This pulls a prebuilt image. Because this is a fork with custom features,
+# that image must exist first — either publish a GitHub release (the repo's
+# workflow builds ghcr.io/thebottlekids/podcast-adblock) or build it on the
+# Unraid box and retag it to match the `image:` line below.
+
+services:
+  podcast-extended:
+    container_name: podcast-extended
+    image: ghcr.io/thebottlekids/podcast-adblock:lite
+    ports:
+      - "5001:5001"
+    volumes:
+      # Single path holds the DB, config, logs, and all audio.
+      - /mnt/user/appdata/podcast-extended:/app/src/instance
+    environment:
+      # Unraid defaults (nobody:users) so files are owned correctly.
+      - PUID=99
+      - PGID=100
+      # CPU image — no GPU. Transcription runs on Groq, ad detection on Ollama.
+      - CUDA_VISIBLE_DEVICES=-1
+      - SERVER_THREADS=1
+      # --- Transcription: Groq (free, fast, no GPU work on this box) ---
+      - WHISPER_TYPE=groq
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      # --- Ad-detection LLM: your local Ollama ---
+      # Use the host LAN IP (not localhost) so the container can reach Ollama.
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

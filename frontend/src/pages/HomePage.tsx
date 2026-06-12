@@ -163,11 +163,12 @@ export default function HomePage() {
         </div>
 
         <div className="flex-1 min-h-0 overflow-hidden">
-          <FeedList 
-            feeds={feeds || []} 
+          <FeedList
+            feeds={feeds || []}
             onFeedDeleted={refetch}
             onFeedSelected={setSelectedFeed}
             selectedFeedId={selectedFeed?.id}
+            onFeedsUpdated={refetch}
           />
         </div>
       </div>

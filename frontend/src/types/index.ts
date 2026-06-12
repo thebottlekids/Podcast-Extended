@@ -10,6 +10,7 @@ export interface Feed {
   is_member?: boolean;
   is_active_subscription?: boolean;
   auto_whitelist_new_episodes_override?: boolean | null;
+  episode_retention_count?: number | null;
 }
 
 export interface Episode {
