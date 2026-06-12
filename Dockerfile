@@ -107,15 +107,18 @@ ENV PIPENV_VENV_IN_PROJECT=1
 ENV PIPENV_TIMEOUT=1200
 
 # Install dependencies conditionally based on LITE_BUILD
+# Note: --deploy is intentionally omitted so the build re-locks from the
+# Pipfile if the committed lock is out of date (e.g. after a dependency
+# change). Restore --deploy once the lockfiles are regenerated in sync.
 RUN set -e && \
     if [ "${LITE_BUILD}" = "true" ]; then \
     echo "Installing lite dependencies (without Whisper)"; \
     echo "Using lite Pipfile:" && \
-    PIPENV_PIPFILE=Pipfile.lite pipenv install --deploy --system; \
+    PIPENV_PIPFILE=Pipfile.lite pipenv install --system; \
     else \
     echo "Installing full dependencies (including Whisper)"; \
     echo "Using full Pipfile:" && \
-    PIPENV_PIPFILE=Pipfile pipenv install --deploy --system; \
+    PIPENV_PIPFILE=Pipfile pipenv install --system; \
     fi
 
 # Install PyTorch with CUDA support if using NVIDIA image (skip if LITE_BUILD)
