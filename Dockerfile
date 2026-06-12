@@ -79,8 +79,11 @@ RUN if [ -f /etc/debian_version ]; then \
     fi ; \
     fi
 
-# Copy all Pipfiles/lock files
-COPY Pipfile Pipfile.lock Pipfile.lite Pipfile.lite.lock ./
+# Copy Pipfiles. Lock files are intentionally not required here: the install
+# below runs without --deploy and re-locks from the Pipfile, so a committed
+# lock is not needed inside the image. (Restore the lock copy + --deploy once
+# the lockfiles are regenerated in sync.)
+COPY Pipfile Pipfile.lite ./
 
 # Remove problematic distutils-installed packages that may conflict
 RUN if [ -f /etc/debian_version ]; then \
