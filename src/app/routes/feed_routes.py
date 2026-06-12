@@ -481,7 +481,11 @@ def update_feed_settings_endpoint(feed_id: int) -> ResponseReturnValue:
         return jsonify({"error": "No settings provided."}), 400
 
     override = payload.get("auto_whitelist_new_episodes_override")
-    if "auto_whitelist_new_episodes_override" in payload and override is not None and not isinstance(override, bool):
+    if (
+        "auto_whitelist_new_episodes_override" in payload
+        and override is not None
+        and not isinstance(override, bool)
+    ):
         return (
             jsonify(
                 {
@@ -494,9 +498,16 @@ def update_feed_settings_endpoint(feed_id: int) -> ResponseReturnValue:
     retention = payload.get("episode_retention_count")
     if "episode_retention_count" in payload and retention is not None:
         if not isinstance(retention, int) or retention < 1:
-            return jsonify({"error": "episode_retention_count must be a positive integer or null."}), 400
+            return (
+                jsonify(
+                    {
+                        "error": "episode_retention_count must be a positive integer or null."
+                    }
+                ),
+                400,
+            )
 
-    action_params: dict = {"feed_id": feed_id}
+    action_params: dict[str, Any] = {"feed_id": feed_id}
     if "auto_whitelist_new_episodes_override" in payload:
         action_params["auto_whitelist_new_episodes_override"] = override
     if "episode_retention_count" in payload:
@@ -531,23 +542,40 @@ def bulk_update_feed_settings_endpoint() -> ResponseReturnValue:
     if not known_fields.intersection(payload.keys()):
         return jsonify({"error": "No settings provided."}), 400
 
-    action_params: dict = {"feed_ids": feed_ids}
+    action_params: dict[str, Any] = {"feed_ids": feed_ids}
 
     if "auto_whitelist_new_episodes_override" in payload:
         override = payload.get("auto_whitelist_new_episodes_override")
         if override is not None and not isinstance(override, bool):
-            return jsonify({"error": "auto_whitelist_new_episodes_override must be a boolean or null."}), 400
+            return (
+                jsonify(
+                    {
+                        "error": "auto_whitelist_new_episodes_override must be a boolean or null."
+                    }
+                ),
+                400,
+            )
         action_params["auto_whitelist_new_episodes_override"] = override
 
     if "episode_retention_count" in payload:
         retention = payload.get("episode_retention_count")
         if retention is not None and (not isinstance(retention, int) or retention < 1):
-            return jsonify({"error": "episode_retention_count must be a positive integer or null."}), 400
+            return (
+                jsonify(
+                    {
+                        "error": "episode_retention_count must be a positive integer or null."
+                    }
+                ),
+                400,
+            )
         action_params["episode_retention_count"] = retention
 
     result = writer_client.action("bulk_update_feed_settings", action_params, wait=True)
     if result is None or not result.success:
-        return jsonify({"error": getattr(result, "error", "Failed to update feeds")}), 500
+        return (
+            jsonify({"error": getattr(result, "error", "Failed to update feeds")}),
+            500,
+        )
 
     return jsonify({"updated": getattr(result, "data", {}).get("updated", 0)})
 
