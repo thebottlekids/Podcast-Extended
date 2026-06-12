@@ -11,8 +11,7 @@ disable = [
     "too-many-locals",
     "unspecified-encoding",
     "line-too-long",
-    "too-many-return-statements",
-    "too-many-lines"
+    "too-many-return-statements"
 ]
 
 [tool.mypy]
