@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: "Pipfile.lock"
+          cache-dependency-path: "Pipfile"
 
       - name: Install ffmpeg
         run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg
