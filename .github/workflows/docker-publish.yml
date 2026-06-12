@@ -5,6 +5,7 @@ on:
     types: [published]
   push:
     branches: [main]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -110,7 +111,8 @@ jobs:
   build-dev-lite:
     # Fast lite image (no torch/whisper) on every push to main, so a
     # self-hosted box can pull :lite and Force Update for quick iteration.
-    if: github.event_name == 'push'
+    # Also runnable on demand via the Actions "Run workflow" button.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
