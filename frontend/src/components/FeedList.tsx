@@ -20,6 +20,8 @@ export default function FeedList({ feeds, onFeedSelected, selectedFeedId, onFeed
   const [bulkRetentionInput, setBulkRetentionInput] = useState('');
   const { requireAuth, user } = useAuth();
   const showMembership = Boolean(requireAuth && user?.role === 'admin');
+  // Admin in no-auth mode too (matches FeedDetail), so bulk select works without auth.
+  const isAdmin = !requireAuth || user?.role === 'admin';
 
   const feedsArray = Array.isArray(feeds) ? feeds : [];
 
@@ -127,7 +129,7 @@ export default function FeedList({ feeds, onFeedSelected, selectedFeedId, onFeed
           onChange={(event) => setSearchTerm(event.target.value)}
           className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
         />
-        {showMembership && (
+        {isAdmin && (
           <button
             onClick={() => {
               if (selectionMode) exitSelectionMode();
