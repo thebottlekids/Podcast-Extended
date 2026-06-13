@@ -124,6 +124,14 @@ def update_feed_settings_action(params: Dict[str, Any]) -> Dict[str, Any]:
         val = params.get("episode_retention_count")
         feed.episode_retention_count = int(val) if val is not None else None
 
+    if "title_filter_include" in params:
+        val = params.get("title_filter_include")
+        feed.title_filter_include = str(val).strip() if val is not None else None
+
+    if "title_filter_exclude" in params:
+        val = params.get("title_filter_exclude")
+        feed.title_filter_exclude = str(val).strip() if val is not None else None
+
     db.session.flush()
     return {"feed_id": feed.id}
 
@@ -145,6 +153,12 @@ def bulk_update_feed_settings_action(params: Dict[str, Any]) -> Dict[str, Any]:
         if "episode_retention_count" in params:
             val = params.get("episode_retention_count")
             feed.episode_retention_count = int(val) if val is not None else None
+        if "title_filter_include" in params:
+            val = params.get("title_filter_include")
+            feed.title_filter_include = str(val).strip() if val is not None else None
+        if "title_filter_exclude" in params:
+            val = params.get("title_filter_exclude")
+            feed.title_filter_exclude = str(val).strip() if val is not None else None
         updated += 1
 
     db.session.flush()

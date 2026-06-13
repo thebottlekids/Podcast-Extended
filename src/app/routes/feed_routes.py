@@ -471,13 +471,20 @@ def refresh_feed_endpoint(f_id: int) -> ResponseReturnValue:
 
 
 @feed_bp.route("/api/feeds/<int:feed_id>/settings", methods=["PATCH"])
-def update_feed_settings_endpoint(feed_id: int) -> ResponseReturnValue:
+def update_feed_settings_endpoint(  # pylint: disable=too-many-branches
+    feed_id: int,
+) -> ResponseReturnValue:
     _, error_response = require_admin("update feed settings")
     if error_response is not None:
         return error_response
 
     payload = request.get_json(silent=True) or {}
-    known_fields = {"auto_whitelist_new_episodes_override", "episode_retention_count"}
+    known_fields = {
+        "auto_whitelist_new_episodes_override",
+        "episode_retention_count",
+        "title_filter_include",
+        "title_filter_exclude",
+    }
     if not known_fields.intersection(payload.keys()):
         return jsonify({"error": "No settings provided."}), 400
 
@@ -508,11 +515,20 @@ def update_feed_settings_endpoint(feed_id: int) -> ResponseReturnValue:
                 400,
             )
 
+    for field in ("title_filter_include", "title_filter_exclude"):
+        val = payload.get(field)
+        if field in payload and val is not None and not isinstance(val, str):
+            return jsonify({"error": f"{field} must be a string or null."}), 400
+
     action_params: dict[str, Any] = {"feed_id": feed_id}
     if "auto_whitelist_new_episodes_override" in payload:
         action_params["auto_whitelist_new_episodes_override"] = override
     if "episode_retention_count" in payload:
         action_params["episode_retention_count"] = retention
+    if "title_filter_include" in payload:
+        action_params["title_filter_include"] = payload.get("title_filter_include")
+    if "title_filter_exclude" in payload:
+        action_params["title_filter_exclude"] = payload.get("title_filter_exclude")
 
     result = writer_client.action("update_feed_settings", action_params, wait=True)
     if result is None or not result.success:
@@ -539,7 +555,12 @@ def bulk_update_feed_settings_endpoint() -> ResponseReturnValue:
     if not feed_ids or not isinstance(feed_ids, list):
         return jsonify({"error": "feed_ids must be a non-empty list."}), 400
 
-    known_fields = {"auto_whitelist_new_episodes_override", "episode_retention_count"}
+    known_fields = {
+        "auto_whitelist_new_episodes_override",
+        "episode_retention_count",
+        "title_filter_include",
+        "title_filter_exclude",
+    }
     if not known_fields.intersection(payload.keys()):
         return jsonify({"error": "No settings provided."}), 400
 
@@ -570,6 +591,13 @@ def bulk_update_feed_settings_endpoint() -> ResponseReturnValue:
                 400,
             )
         action_params["episode_retention_count"] = retention
+
+    for field in ("title_filter_include", "title_filter_exclude"):
+        if field in payload:
+            val = payload.get(field)
+            if val is not None and not isinstance(val, str):
+                return jsonify({"error": f"{field} must be a string or null."}), 400
+            action_params[field] = val
 
     result = writer_client.action("bulk_update_feed_settings", action_params, wait=True)
     if result is None or not result.success:
@@ -1011,6 +1039,8 @@ def _serialize_feed(
             feed, "auto_whitelist_new_episodes_override", None
         ),
         "episode_retention_count": getattr(feed, "episode_retention_count", None),
+        "title_filter_include": getattr(feed, "title_filter_include", None),
+        "title_filter_exclude": getattr(feed, "title_filter_exclude", None),
         "posts_count": len(feed.posts),
         "member_count": len(member_ids),
         "is_member": is_member,

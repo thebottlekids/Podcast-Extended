@@ -153,7 +153,12 @@ export const feedsApi = {
 
   updateFeedSettings: async (
     feedId: number,
-    settings: { auto_whitelist_new_episodes_override?: boolean | null; episode_retention_count?: number | null }
+    settings: {
+      auto_whitelist_new_episodes_override?: boolean | null;
+      episode_retention_count?: number | null;
+      title_filter_include?: string | null;
+      title_filter_exclude?: string | null;
+    }
   ): Promise<Feed> => {
     const response = await api.patch(`/api/feeds/${feedId}/settings`, settings);
     return response.data;
@@ -161,7 +166,12 @@ export const feedsApi = {
 
   bulkUpdateFeedSettings: async (
     feedIds: number[],
-    settings: { auto_whitelist_new_episodes_override?: boolean | null; episode_retention_count?: number | null }
+    settings: {
+      auto_whitelist_new_episodes_override?: boolean | null;
+      episode_retention_count?: number | null;
+      title_filter_include?: string | null;
+      title_filter_exclude?: string | null;
+    }
   ): Promise<{ updated: number }> => {
     const response = await api.patch('/api/feeds/bulk-settings', { feed_ids: feedIds, ...settings });
     return response.data;

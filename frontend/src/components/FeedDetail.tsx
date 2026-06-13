@@ -162,6 +162,12 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
   const [retentionInput, setRetentionInput] = useState<string>(
     currentFeed.episode_retention_count != null ? String(currentFeed.episode_retention_count) : ''
   );
+  const [filterIncludeInput, setFilterIncludeInput] = useState<string>(
+    currentFeed.title_filter_include ?? ''
+  );
+  const [filterExcludeInput, setFilterExcludeInput] = useState<string>(
+    currentFeed.title_filter_exclude ?? ''
+  );
 
   const updateFeedSettingsMutation = useMutation({
     mutationFn: (override: boolean | null) =>
@@ -210,6 +216,26 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
       const n = parseInt(trimmed, 10);
       if (!isNaN(n) && n > 0) updateRetentionMutation.mutate(n);
     }
+  };
+
+  const updateTitleFilterMutation = useMutation({
+    mutationFn: (settings: { title_filter_include: string | null; title_filter_exclude: string | null }) =>
+      feedsApi.updateFeedSettings(currentFeed.id, settings),
+    onSuccess: (data) => {
+      setCurrentFeed(data);
+      queryClient.invalidateQueries({ queryKey: ['feeds'] });
+      toast.success('Title filter updated');
+    },
+    onError: () => {
+      toast.error('Failed to update title filter');
+    },
+  });
+
+  const handleTitleFilterSave = () => {
+    updateTitleFilterMutation.mutate({
+      title_filter_include: filterIncludeInput.trim() || null,
+      title_filter_exclude: filterExcludeInput.trim() || null,
+    });
   };
 
   const deleteFeedMutation = useMutation({
@@ -287,6 +313,9 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
 
   useEffect(() => {
     setCurrentFeed(feed);
+    setRetentionInput(feed.episode_retention_count != null ? String(feed.episode_retention_count) : '');
+    setFilterIncludeInput(feed.title_filter_include ?? '');
+    setFilterExcludeInput(feed.title_filter_exclude ?? '');
   }, [feed]);
 
   useEffect(() => {
@@ -868,6 +897,51 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
                       className="px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
                     >
                       Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Title Filter */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <label className="text-sm font-medium text-gray-900">
+                      Episode title filter
+                    </label>
+                    <p className="text-xs text-gray-600">
+                      Comma-separated terms (case-insensitive). Only gates <strong>auto-enable</strong> of new episodes — manual enable always works.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div>
+                      <label className="text-xs font-medium text-gray-700 mb-1 block">Must contain (any)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. interview, review"
+                        value={filterIncludeInput}
+                        onChange={(e) => setFilterIncludeInput(e.target.value)}
+                        disabled={updateTitleFilterMutation.isPending}
+                        className="text-sm border border-gray-300 rounded-md px-3 py-2 bg-white w-full disabled:opacity-60"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700 mb-1 block">Must not contain (any)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. bonus, short"
+                        value={filterExcludeInput}
+                        onChange={(e) => setFilterExcludeInput(e.target.value)}
+                        disabled={updateTitleFilterMutation.isPending}
+                        className="text-sm border border-gray-300 rounded-md px-3 py-2 bg-white w-full disabled:opacity-60"
+                      />
+                    </div>
+                    <button
+                      onClick={handleTitleFilterSave}
+                      disabled={updateTitleFilterMutation.isPending}
+                      className="self-start px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      Save filter
                     </button>
                   </div>
                 </div>

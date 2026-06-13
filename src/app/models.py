@@ -32,6 +32,8 @@ class Feed(db.Model):  # type: ignore[name-defined, misc]
     image_url = db.Column(db.Text)
     auto_whitelist_new_episodes_override = db.Column(db.Boolean, nullable=True)
     episode_retention_count = db.Column(db.Integer, nullable=True)
+    title_filter_include = db.Column(db.Text, nullable=True)
+    title_filter_exclude = db.Column(db.Text, nullable=True)
 
     posts = db.relationship(
         "Post", backref="feed", lazy=True, order_by="Post.release_date.desc()"

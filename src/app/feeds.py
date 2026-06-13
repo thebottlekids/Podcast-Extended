@@ -44,11 +44,31 @@ def is_feed_active_for_user(feed_id: int, user: User) -> bool:
     return False
 
 
+def _passes_title_filter(feed: Feed, post: Optional[Post]) -> bool:
+    """Return True if post.title satisfies the feed's include/exclude term lists."""
+    if post is None:
+        return True
+    title = (post.title or "").lower()
+    include_raw = getattr(feed, "title_filter_include", None)
+    if include_raw:
+        terms = [t.strip().lower() for t in include_raw.split(",") if t.strip()]
+        if terms and not any(term in title for term in terms):
+            return False
+    exclude_raw = getattr(feed, "title_filter_exclude", None)
+    if exclude_raw:
+        terms = [t.strip().lower() for t in exclude_raw.split(",") if t.strip()]
+        if any(term in title for term in terms):
+            return False
+    return True
+
+
 def _should_auto_whitelist_new_posts(feed: Feed, post: Optional[Post] = None) -> bool:
     """Return True when new posts should default to whitelisted for this feed."""
     override = getattr(feed, "auto_whitelist_new_episodes_override", None)
     if override is not None:
-        return bool(override)
+        if not bool(override):
+            return False
+        return _passes_title_filter(feed, post)
 
     if not getattr(config, "automatically_whitelist_new_episodes", False):
         return False
@@ -57,14 +77,14 @@ def _should_auto_whitelist_new_posts(feed: Feed, post: Optional[Post] = None) ->
 
     # If auth is disabled, we should auto-whitelist if the global setting is on.
     if not is_auth_enabled():
-        return True
+        return _passes_title_filter(feed, post)
 
     memberships = getattr(feed, "user_feeds", None) or []
     if not memberships:
         # No memberships for this feed. If there are no users in the database at all,
         # still whitelist. This handles fresh installs where no account exists yet.
         if db.session.query(User.id).first() is None:
-            return True
+            return _passes_title_filter(feed, post)
         return False
 
     # Check if at least one member has this feed in their "active" list (within allowance)
@@ -74,7 +94,7 @@ def _should_auto_whitelist_new_posts(feed: Feed, post: Optional[Post] = None) ->
             continue
 
         if is_feed_active_for_user(feed.id, user):
-            return True
+            return _passes_title_filter(feed, post)
 
     return False
 
