@@ -260,7 +260,7 @@ def _configure_proxy(app: Flask) -> None:
         )
         count = 0
     if count > 0:
-        app.wsgi_app = ProxyFix(  # type: ignore[assignment]
+        app.wsgi_app = ProxyFix(  # type: ignore[method-assign]
             app.wsgi_app,
             x_for=count,
             x_proto=count,
