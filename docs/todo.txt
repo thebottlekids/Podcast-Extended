@@ -1,12 +1,11 @@
 - config audit & testing (advanced and basic)
-- move host/port/threads to docker config
-reaudit security + testing
-ci.sh
-test railway
-login for public facing
-podcast rss search
+- reaudit security + testing
+- ci.sh
+- test railway
+- login for public facing
+- podcast rss search
 
-'basic' config page - just put in groq api key + test + save on populate
-also show if api key is set or blank
-
-test hide 'local' whisper in lite build
+[done] 'basic' config page - just put in groq api key + test + save on populate
+[done] also show if api key is set or blank (KeyStatusBadge in DefaultTab)
+[done] move host/port/threads to docker config (PORT added to all compose env sections)
+[done] test hide 'local' whisper in lite build (handled via /api/config/whisper-capabilities; frontend hides 'local' option when unavailable)

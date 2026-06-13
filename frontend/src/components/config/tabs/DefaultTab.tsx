@@ -15,12 +15,26 @@ export default function DefaultTab() {
     groqRecommendedModel,
     groqRecommendedWhisper,
     applyGroqKey,
+    isApplyingGroqKey,
   } = useConfigContext();
 
   const [showGroqHelp, setShowGroqHelp] = useState(false);
   const [showGroqPricing, setShowGroqPricing] = useState(false);
 
   if (!pending) return null;
+
+  const currentGroqKey =
+    pending?.whisper?.whisper_type === 'groq'
+      ? getWhisperApiKey(pending?.whisper)
+      : pending?.llm?.llm_api_key || '';
+
+  const groqKeyPlaceholder =
+    pending?.whisper?.whisper_type === 'groq'
+      ? pending?.whisper?.api_key_preview || ''
+      : pending?.llm?.llm_api_key_preview || '';
+
+  const keyIsSet = !!groqKeyPlaceholder && !currentGroqKey;
+  const keyIsPending = !!currentGroqKey;
 
   const handleGroqKeyChange = (val: string) => {
     updatePending((prevConfig) => {
@@ -46,16 +60,6 @@ export default function DefaultTab() {
     if (!key.trim()) return;
     void applyGroqKey(key.trim());
   };
-
-  const currentGroqKey =
-    pending?.whisper?.whisper_type === 'groq'
-      ? getWhisperApiKey(pending?.whisper)
-      : pending?.llm?.llm_api_key || '';
-
-  const groqKeyPlaceholder =
-    pending?.whisper?.whisper_type === 'groq'
-      ? pending?.whisper?.api_key_preview || ''
-      : pending?.llm?.llm_api_key_preview || '';
 
   return (
     <div className="space-y-6">
@@ -101,19 +105,30 @@ export default function DefaultTab() {
         {showGroqPricing && <GroqPricingBox />}
 
         <Field label="Groq API Key" envMeta={getEnvHint('groq.api_key')}>
-          <div className="flex gap-2">
-            <input
-              className="input"
-              type="text"
-              placeholder={groqKeyPlaceholder}
-              value={currentGroqKey}
-              onChange={(e) => handleGroqKeyChange(e.target.value)}
-              onBlur={(e) => handleGroqKeyApply(e.target.value)}
-              onPaste={(e) => {
-                const text = e.clipboardData.getData('text').trim();
-                if (text) handleGroqKeyApply(text);
-              }}
-            />
+          <div className="space-y-2">
+            <div className="flex gap-2 items-center">
+              <input
+                className="input"
+                type="text"
+                placeholder={groqKeyPlaceholder || 'gsk_...'}
+                value={currentGroqKey}
+                onChange={(e) => handleGroqKeyChange(e.target.value)}
+                onBlur={(e) => handleGroqKeyApply(e.target.value)}
+                onPaste={(e) => {
+                  const text = e.clipboardData.getData('text').trim();
+                  if (text) handleGroqKeyApply(text);
+                }}
+              />
+              <button
+                type="button"
+                disabled={!currentGroqKey.trim() || isApplyingGroqKey}
+                onClick={() => handleGroqKeyApply(currentGroqKey)}
+                className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+              >
+                {isApplyingGroqKey ? 'Saving…' : 'Apply & Save'}
+              </button>
+            </div>
+            <KeyStatusBadge isSet={keyIsSet} isPending={keyIsPending} />
           </div>
         </Field>
       </Section>
@@ -121,6 +136,31 @@ export default function DefaultTab() {
       {/* Input styling */}
       <style>{`.input{width:100%;padding:0.5rem;border:1px solid #e5e7eb;border-radius:0.375rem;font-size:0.875rem}`}</style>
     </div>
+  );
+}
+
+function KeyStatusBadge({ isSet, isPending }: { isSet: boolean; isPending: boolean }) {
+  if (isPending) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5">
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
+        Unsaved change — click Apply &amp; Save or tab away to save
+      </span>
+    );
+  }
+  if (isSet) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-0.5">
+        <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+        API key is set
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded px-2 py-0.5">
+      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
+      No API key saved
+    </span>
   );
 }
 
