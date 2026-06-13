@@ -3,10 +3,11 @@ import logging
 import math
 import os
 from pathlib import Path
+from threading import Thread
 from typing import Any, Dict, Optional, cast
 
 import flask
-from flask import Blueprint, g, jsonify, request, send_file
+from flask import Blueprint, current_app, g, jsonify, request, send_file
 from flask.typing import ResponseReturnValue
 
 from app.auth.guards import require_admin
@@ -622,6 +623,69 @@ def api_toggle_whitelist_all(feed_id: int) -> ResponseReturnValue:
             "total_count": total_count,
             "all_whitelisted": new_status,
             "updated_count": updated,
+        }
+    )
+
+
+def _enqueue_pending_jobs_after_bulk(app: flask.Flask) -> None:
+    with app.app_context():
+        try:
+            get_jobs_manager().enqueue_pending_jobs(trigger="bulk_whitelist")
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("Failed to enqueue jobs after bulk whitelist: %s", exc)
+
+
+@post_bp.route("/api/posts/bulk-whitelist", methods=["POST"])
+def api_bulk_whitelist() -> ResponseReturnValue:
+    """Enable/disable whitelist for a set of episodes by id (admin only)."""
+    _, error = require_admin("bulk whitelist episodes")
+    if error:
+        return error
+
+    data = request.get_json(silent=True) or {}
+    post_ids = data.get("post_ids")
+    if not post_ids or not isinstance(post_ids, list):
+        return flask.make_response(
+            flask.jsonify({"error": "post_ids must be a non-empty list"}), 400
+        )
+    if "whitelisted" not in data:
+        return flask.make_response(
+            flask.jsonify({"error": "Missing whitelisted field"}), 400
+        )
+
+    new_status = bool(data["whitelisted"])
+    try:
+        result = writer_client.action(
+            "set_posts_whitelist",
+            {"post_ids": post_ids, "whitelisted": new_status},
+            wait=True,
+        )
+        if not result or not result.success:
+            raise RuntimeError(getattr(result, "error", "Unknown writer error"))
+        updated = int((result.data or {}).get("updated") or 0)
+    except Exception:  # pylint: disable=broad-except
+        return (
+            flask.jsonify(
+                {"error": "Database busy, please retry", "retry_after_seconds": 1}
+            ),
+            503,
+        )
+
+    # Kick off processing for newly-enabled episodes in the background.
+    if new_status and updated:
+        app = cast(Any, current_app)._get_current_object()
+        Thread(
+            target=_enqueue_pending_jobs_after_bulk, args=(app,), daemon=True
+        ).start()
+
+    return flask.jsonify(
+        {
+            "updated": updated,
+            "whitelisted": new_status,
+            "message": (
+                f"{'Enabled' if new_status else 'Disabled'} "
+                f"{updated} episode{'s' if updated != 1 else ''}"
+            ),
         }
     )
 

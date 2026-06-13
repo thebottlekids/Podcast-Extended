@@ -27,6 +27,7 @@ from .feeds import refresh_feed_action as refresh_feed_action
 from .feeds import (
     remove_user_feed_membership_action as remove_user_feed_membership_action,
 )
+from .feeds import set_posts_whitelist_action as set_posts_whitelist_action
 from .feeds import (
     toggle_whitelist_all_for_feed_action as toggle_whitelist_all_for_feed_action,
 )

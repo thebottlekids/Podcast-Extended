@@ -175,6 +175,20 @@ def whitelist_post_action(params: Dict[str, Any]) -> Dict[str, Any]:
     return {"post_id": int(post_id), "updated": int(updated)}
 
 
+def set_posts_whitelist_action(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Set whitelist status for a list of posts by id (bulk enable/disable)."""
+    post_ids = params.get("post_ids")
+    if not post_ids:
+        raise ValueError("post_ids is required")
+
+    new_status = bool(params.get("whitelisted"))
+    ids = [int(p) for p in post_ids]
+    updated = Post.query.filter(Post.id.in_(ids)).update(
+        {Post.whitelisted: new_status}, synchronize_session=False
+    )
+    return {"updated": int(updated), "whitelisted": new_status}
+
+
 def ensure_user_feed_membership_action(params: Dict[str, Any]) -> Dict[str, Any]:
     feed_id = params.get("feed_id")
     user_id = params.get("user_id")

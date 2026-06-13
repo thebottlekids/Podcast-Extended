@@ -125,6 +125,17 @@ export const feedsApi = {
     return response.data;
   },
 
+  bulkWhitelistPosts: async (
+    postIds: number[],
+    whitelisted: boolean
+  ): Promise<{ updated: number; whitelisted: boolean; message: string }> => {
+    const response = await api.post('/api/posts/bulk-whitelist', {
+      post_ids: postIds,
+      whitelisted,
+    });
+    return response.data;
+  },
+
   joinFeed: async (feedId: number): Promise<Feed> => {
     const response = await api.post(`/api/feeds/${feedId}/join`);
     return response.data;

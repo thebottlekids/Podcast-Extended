@@ -34,6 +34,8 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [showStickyHeader, setShowStickyHeader] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [episodeSelectMode, setEpisodeSelectMode] = useState(false);
+  const [selectedEpisodeIds, setSelectedEpisodeIds] = useState<Set<number>>(new Set());
   const [showMenu, setShowMenu] = useState(false);
   const queryClient = useQueryClient();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -97,6 +99,42 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
       queryClient.invalidateQueries({ queryKey: ['episodes', currentFeed.id] });
     },
   });
+
+  const bulkSelectedWhitelistMutation = useMutation({
+    mutationFn: ({ postIds, whitelisted }: { postIds: number[]; whitelisted: boolean }) =>
+      feedsApi.bulkWhitelistPosts(postIds, whitelisted),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['episodes', currentFeed.id] });
+      toast.success(data.message);
+      setEpisodeSelectMode(false);
+      setSelectedEpisodeIds(new Set());
+    },
+    onError: () => {
+      toast.error('Failed to update selected episodes');
+    },
+  });
+
+  const toggleEpisodeSelection = (id: number) => {
+    setSelectedEpisodeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const exitEpisodeSelectMode = () => {
+    setEpisodeSelectMode(false);
+    setSelectedEpisodeIds(new Set());
+  };
+
+  const handleBulkEpisodeWhitelist = (whitelisted: boolean) => {
+    if (selectedEpisodeIds.size === 0) return;
+    bulkSelectedWhitelistMutation.mutate({
+      postIds: Array.from(selectedEpisodeIds),
+      whitelisted,
+    });
+  };
 
   const refreshFeedMutation = useMutation({
     mutationFn: () => feedsApi.refreshFeed(currentFeed.id),
@@ -854,20 +892,60 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
           </div>
         )}
 
-        {/* Episodes Header with Sort Only */}
+        {/* Episodes Header with Sort + bulk select */}
         <div className="p-4 border-b bg-gray-50">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <h3 className="text-lg font-semibold text-gray-900">Episodes</h3>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortOption)}
-              className="text-sm border border-gray-300 rounded-md px-3 py-1 bg-white"
-            >
-              <option value="newest">Newest First</option>
-              <option value="oldest">Oldest First</option>
-              <option value="title">Title A-Z</option>
-            </select>
+            <div className="flex items-center gap-2">
+              {canBulkModifyEpisodes && (
+                <button
+                  onClick={() =>
+                    episodeSelectMode ? exitEpisodeSelectMode() : setEpisodeSelectMode(true)
+                  }
+                  className={`text-sm px-3 py-1 rounded-md border font-medium transition-colors ${
+                    episodeSelectMode
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {episodeSelectMode ? 'Cancel' : 'Select'}
+                </button>
+              )}
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortOption)}
+                className="text-sm border border-gray-300 rounded-md px-3 py-1 bg-white"
+              >
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="title">Title A-Z</option>
+              </select>
+            </div>
           </div>
+          {episodeSelectMode && (
+            <div className="mt-2 flex items-center gap-2 text-sm">
+              <button
+                onClick={() => {
+                  const ids = sortedEpisodes.map((e) => e.id);
+                  const allSel = ids.length > 0 && ids.every((id) => selectedEpisodeIds.has(id));
+                  setSelectedEpisodeIds((prev) => {
+                    const next = new Set(prev);
+                    if (allSel) ids.forEach((id) => next.delete(id));
+                    else ids.forEach((id) => next.add(id));
+                    return next;
+                  });
+                }}
+                className="text-blue-600 hover:underline"
+              >
+                {sortedEpisodes.length > 0 && sortedEpisodes.every((e) => selectedEpisodeIds.has(e.id))
+                  ? 'Deselect page'
+                  : 'Select page'}
+              </button>
+              <span className="text-gray-400">|</span>
+              <span className="text-gray-600">{selectedEpisodeIds.size} selected</span>
+              <span className="text-gray-400">— selections persist as you page</span>
+            </div>
+          )}
         </div>
 
             {/* Help Explainer (admins only) */}
@@ -920,8 +998,22 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
           ) : (
             <div className="divide-y divide-gray-200">
               {sortedEpisodes.map((episode) => (
-                <div key={episode.id} className="p-4 hover:bg-gray-50">
-                  <div className={`flex flex-col ${episode.whitelisted ? 'gap-3' : 'gap-2'}`}>
+                <div
+                  key={episode.id}
+                  className={`p-4 hover:bg-gray-50 ${
+                    episodeSelectMode && selectedEpisodeIds.has(episode.id) ? 'bg-blue-50' : ''
+                  }`}
+                >
+                  <div className="flex gap-3">
+                    {episodeSelectMode && (
+                      <input
+                        type="checkbox"
+                        checked={selectedEpisodeIds.has(episode.id)}
+                        onChange={() => toggleEpisodeSelection(episode.id)}
+                        className="mt-1 w-4 h-4 flex-shrink-0 text-blue-600 rounded border-gray-300"
+                      />
+                    )}
+                    <div className={`flex-1 min-w-0 flex flex-col ${episode.whitelisted ? 'gap-3' : 'gap-2'}`}>
                     {/* Top Section: Thumbnail and Title */}
                     <div className="flex items-start gap-3">
                       {/* Episode/Podcast Thumbnail */}
@@ -1049,12 +1141,41 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
                         </div>
                       </div>
                     )}
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
+
+        {episodeSelectMode && selectedEpisodeIds.size > 0 && (
+          <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-200 shadow-lg p-3 flex flex-wrap items-center justify-center gap-3">
+            <span className="text-sm text-gray-700 font-medium">
+              {selectedEpisodeIds.size} episode{selectedEpisodeIds.size !== 1 ? 's' : ''} selected
+            </span>
+            <button
+              disabled={bulkSelectedWhitelistMutation.isPending}
+              onClick={() => handleBulkEpisodeWhitelist(true)}
+              className="px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+            >
+              Enable selected
+            </button>
+            <button
+              disabled={bulkSelectedWhitelistMutation.isPending}
+              onClick={() => handleBulkEpisodeWhitelist(false)}
+              className="px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
+            >
+              Disable selected
+            </button>
+            <button
+              onClick={exitEpisodeSelectMode}
+              className="px-3 py-1.5 text-xs font-medium bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+            >
+              Clear
+            </button>
+          </div>
+        )}
 
         {totalCount > 0 && (
           <div className="flex items-center justify-between px-4 py-3 border-t bg-white">
