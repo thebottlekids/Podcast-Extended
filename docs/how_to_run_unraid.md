@@ -89,4 +89,69 @@ To point ad detection at a local Ollama running on the same Unraid host:
 
 - **Update**: `git push` to `main`, wait for the Action to rebuild `:lite`, then hit **Force Update** on the container in the Docker tab. (Or rebuild locally and restart.) Migrations run on start.
 - **Backup**: stop the container and copy `/mnt/user/appdata/podcast-extended`. That folder is everything.
-- **Auth**: leave `REQUIRE_AUTH=false` if the UI stays on your LAN. If you expose it (reverse proxy), set `REQUIRE_AUTH=true` plus the admin username/password and a strong `PODLY_SECRET_KEY`.
+- **Auth**: leave `REQUIRE_AUTH=false` if the UI stays on your LAN. If you expose it (reverse proxy), see section 5 below.
+
+---
+
+## 5. Exposing to the internet (reverse proxy + auth)
+
+> Skip this section if Podcast-Extended stays on your LAN.
+
+### 5a. Container environment variables
+
+Set all of these on the container before exposing it:
+
+| Variable | Value | Notes |
+|----------|-------|-------|
+| `REQUIRE_AUTH` | `true` | Enables login. Without this, anyone can add feeds and enable episodes. |
+| `PODLY_ADMIN_USERNAME` | *your username* | Admin account created on first start. Default: `podly_admin`. |
+| `PODLY_ADMIN_PASSWORD` | *strong password* | Min 12 characters. Set this **before** first start — it only runs once. |
+| `PODLY_SECRET_KEY` | *64-char random string* | Stable secret for signing sessions. Without it, sessions are lost on every restart. Generate with:<br>`python3 -c "import secrets; print(secrets.token_urlsafe(64))"` |
+| `TRUSTED_PROXY_COUNT` | `1` | Tells the app to trust one reverse proxy hop. **Required** for per-client login rate-limiting to work correctly — without it, the proxy's IP gets blocked instead of the attacker's. |
+| `PODLY_COOKIE_SECURE` | `true` | Marks session cookies as HTTPS-only. Requires your reverse proxy to terminate TLS. |
+
+> **Important**: `PODLY_ADMIN_PASSWORD` is only read during the very first start when no users exist. To change it later, log in as admin and use Settings → Change Password (or the user management panel).
+
+### 5b. Reverse proxy options
+
+Pick whichever fits your setup. The app serves on port `5001` inside the container.
+
+#### Option A — Cloudflare Tunnel (recommended, easiest, free)
+
+No open ports on your router. Cloudflare handles TLS.
+
+1. In Cloudflare Zero Trust → Networks → Tunnels → Create tunnel → Docker
+2. Copy the `docker run` command Cloudflare gives you and run it on Unraid (or add it as a container)
+3. Add a Public Hostname: domain `podcasts.yourdomain.com` → Service `http://unraid-ip:5001`
+4. Done. Cloudflare terminates HTTPS before it ever reaches your LAN.
+
+#### Option B — Nginx Proxy Manager (if you already have NPM on Unraid)
+
+1. NPM → Proxy Hosts → Add
+2. Domain: `podcasts.yourdomain.com`, Forward Host: `unraid-ip`, Forward Port: `5001`
+3. SSL tab → Request Let's Encrypt cert → Force SSL ✓
+4. You handle port-forwarding 80/443 on your router.
+
+#### Option C — Caddy (lightweight, built-in HTTPS)
+
+```
+podcasts.yourdomain.com {
+    reverse_proxy unraid-ip:5001
+}
+```
+
+Caddy auto-obtains a cert via ACME. Requires ports 80/443 forwarded from your router.
+
+### 5c. What the security stack looks like
+
+```
+Internet → Cloudflare / reverse proxy (TLS termination)
+         → Unraid host port 5001
+         → container port 5001
+         → Flask app
+              ├── auth middleware (session cookie, HttpOnly, SameSite=Lax)
+              ├── login rate-limiter (exponential backoff, per client IP via ProxyFix)
+              └── bcrypt password hashing (12 rounds)
+```
+
+No additional firewall rules are needed inside the container — the reverse proxy is the perimeter.

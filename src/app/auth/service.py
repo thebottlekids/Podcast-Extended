@@ -37,6 +37,14 @@ class UserLimitExceededError(AuthServiceError):
 
 
 ALLOWED_ROLES: set[str] = {"admin", "user"}
+_MIN_PASSWORD_LEN = 12
+
+
+def _validate_password_strength(password: str) -> None:
+    if len(password) < _MIN_PASSWORD_LEN:
+        raise PasswordValidationError(
+            f"Password must be at least {_MIN_PASSWORD_LEN} characters."
+        )
 
 
 @dataclass(slots=True)
@@ -74,6 +82,8 @@ def create_user(username: str, password: str, role: str = "user") -> User:
     if role not in ALLOWED_ROLES:
         raise AuthServiceError(f"Role must be one of {sorted(ALLOWED_ROLES)}.")
 
+    _validate_password_strength(password)
+
     if User.query.filter_by(username=normalized_username).first():
         raise DuplicateUserError("A user with that username already exists.")
 
@@ -98,10 +108,12 @@ def change_password(user: User, current_password: str, new_password: str) -> Non
     if not user.verify_password(current_password):
         raise InvalidCredentialsError("Current password is incorrect.")
 
+    _validate_password_strength(new_password)
     update_password(user, new_password)
 
 
 def update_password(user: User, new_password: str) -> None:
+    _validate_password_strength(new_password)
     result = writer_client.action(
         "update_user_password",
         {"user_id": user.id, "new_password": new_password},

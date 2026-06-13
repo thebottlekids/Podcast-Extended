@@ -9,7 +9,9 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/thebottlekids/Podcast-Extended/issues</Support>
   <Project>https://github.com/thebottlekids/Podcast-Extended</Project>
-  <Overview>Self-hosted podcast ad-removal that re-publishes cleaned RSS feeds. Transcribes episodes (Groq, an OpenAI-compatible Whisper server, or local Whisper), detects ads with an LLM (cloud or a local Ollama), and serves an ad-stripped feed your podcast app can subscribe to. This fork (Podcast-Extended) adds bulk enable/disable on the feeds list and per-feed episode retention limits.
+  <Overview>Self-hosted podcast ad-removal that re-publishes cleaned RSS feeds. Transcribes episodes (Groq, an OpenAI-compatible Whisper server, or local Whisper), detects ads with an LLM (cloud or a local Ollama), and serves an ad-stripped feed your podcast app can subscribe to. This fork (Podcast-Extended) adds bulk feed editing, per-feed episode retention limits, and per-feed episode title filters.
+
+For LAN-only use: leave REQUIRE_AUTH=false and access via http://unraid-ip:port. For internet exposure (reverse proxy / Cloudflare Tunnel): set REQUIRE_AUTH=true, PODLY_ADMIN_USERNAME, PODLY_ADMIN_PASSWORD, PODLY_SECRET_KEY, TRUSTED_PROXY_COUNT=1, and PODLY_COOKIE_SECURE=true.
 
 All data, config, and the SQLite database live under the single App Data path you set below.</Overview>
   <Category>MediaApp:Other Tools:</Category>
@@ -35,7 +37,9 @@ All data, config, and the SQLite database live under the single App Data path yo
   <Config Name="SERVER_THREADS" Target="SERVER_THREADS" Default="1" Mode="" Description="Number of web server worker threads." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
   <Config Name="CUDA_VISIBLE_DEVICES" Target="CUDA_VISIBLE_DEVICES" Default="-1" Mode="" Description="Leave at -1 to disable GPU (correct for the CPU image). Only change this if you switch to a GPU image variant." Type="Variable" Display="advanced" Required="false" Mask="false">-1</Config>
   <Config Name="REQUIRE_AUTH" Target="REQUIRE_AUTH" Default="false" Mode="" Description="Set to true to require login for the web UI, feeds, and downloads. If true, also set the admin username/password and secret key below." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
-  <Config Name="PODLY_ADMIN_USERNAME" Target="PODLY_ADMIN_USERNAME" Default="" Mode="" Description="Admin username (only used when REQUIRE_AUTH=true)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
-  <Config Name="PODLY_ADMIN_PASSWORD" Target="PODLY_ADMIN_PASSWORD" Default="" Mode="" Description="Admin password (only used when REQUIRE_AUTH=true)." Type="Variable" Display="advanced" Required="false" Mask="true"/>
-  <Config Name="PODLY_SECRET_KEY" Target="PODLY_SECRET_KEY" Default="" Mode="" Description="Strong random string used to sign sessions (only used when REQUIRE_AUTH=true)." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="PODLY_ADMIN_USERNAME" Target="PODLY_ADMIN_USERNAME" Default="" Mode="" Description="Admin username (only used when REQUIRE_AUTH=true). Default: podly_admin." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="PODLY_ADMIN_PASSWORD" Target="PODLY_ADMIN_PASSWORD" Default="" Mode="" Description="Admin password (only used when REQUIRE_AUTH=true). Minimum 12 characters." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="PODLY_SECRET_KEY" Target="PODLY_SECRET_KEY" Default="" Mode="" Description="Stable random string for signing sessions. Generate with: python3 -c &quot;import secrets; print(secrets.token_urlsafe(64))&quot;. Without this, sessions are lost on restart." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="TRUSTED_PROXY_COUNT" Target="TRUSTED_PROXY_COUNT" Default="0" Mode="" Description="Set to 1 when running behind a reverse proxy (Cloudflare Tunnel, nginx, Caddy, NPM). Required for per-client login rate-limiting to work correctly." Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="PODLY_COOKIE_SECURE" Target="PODLY_COOKIE_SECURE" Default="false" Mode="" Description="Set to true when the reverse proxy terminates HTTPS. Marks session cookies as Secure (HTTPS-only)." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
 </Container>

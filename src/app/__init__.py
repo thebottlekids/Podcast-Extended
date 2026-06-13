@@ -12,6 +12,7 @@ from flask_cors import CORS
 from flask_migrate import upgrade
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from app import models
 from app.auth import AuthSettings, load_auth_settings
@@ -153,6 +154,7 @@ def _create_configured_app(
         setup_dirs()
 
     app = _create_flask_app()
+    _configure_proxy(app)
     app.config["PODLY_APP_ROLE"] = app_role
     auth_settings = _load_auth_settings()
     _apply_auth_settings(app, auth_settings)
@@ -242,6 +244,32 @@ def _validate_env_key_conflicts() -> None:
     # LLM_API_KEY can work with any provider (OpenAI, Groq, Anthropic, etc.) via openai_base_url.
 
 
+def _configure_proxy(app: Flask) -> None:
+    """Wrap the WSGI app with ProxyFix when running behind a reverse proxy.
+
+    Set TRUSTED_PROXY_COUNT=1 when there is exactly one reverse proxy in front
+    (nginx, Caddy, Cloudflare Tunnel, NPM, etc.).  Without this, the login
+    rate-limiter will block the proxy IP instead of the client IP.
+    """
+    raw = os.environ.get("TRUSTED_PROXY_COUNT", "0") or "0"
+    try:
+        count = max(0, int(raw))
+    except ValueError:
+        logger.warning(
+            "TRUSTED_PROXY_COUNT is not a valid integer (%r); ignoring.", raw
+        )
+        count = 0
+    if count > 0:
+        app.wsgi_app = ProxyFix(  # type: ignore[assignment]
+            app.wsgi_app,
+            x_for=count,
+            x_proto=count,
+            x_host=count,
+            x_prefix=count,
+        )
+        logger.info("ProxyFix enabled with TRUSTED_PROXY_COUNT=%d", count)
+
+
 def _create_flask_app() -> Flask:
     static_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "static"))
     return Flask(__name__, static_folder=static_folder)
@@ -281,8 +309,11 @@ def _configure_session(app: Flask, auth_settings: AuthSettings) -> None:
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-    # We always allow HTTP cookies so self-hosted installs work behind simple HTTP reverse proxies.
-    app.config["SESSION_COOKIE_SECURE"] = False
+    # Set PODLY_COOKIE_SECURE=true when the app is behind an HTTPS-terminating reverse proxy
+    # (Cloudflare Tunnel, Caddy, nginx with SSL, NPM, etc.). Leave false for plain HTTP.
+    app.config["SESSION_COOKIE_SECURE"] = _env_bool(
+        "PODLY_COOKIE_SECURE", default=False
+    )
 
 
 def _configure_cors(app: Flask) -> None:
