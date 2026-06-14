@@ -86,6 +86,22 @@ class CommandExecutor:
             writer_actions.whitelist_post_action,
         )
         self.register_action(
+            "set_posts_whitelist",
+            writer_actions.set_posts_whitelist_action,
+        )
+        self.register_action(
+            "bulk_update_feed_settings",
+            writer_actions.bulk_update_feed_settings_action,
+        )
+        self.register_action(
+            "clear_ad_detection",
+            writer_actions.clear_ad_detection_action,
+        )
+        self.register_action(
+            "clear_audio_processing",
+            writer_actions.clear_audio_processing_action,
+        )
+        self.register_action(
             "create_dev_test_feed", writer_actions.create_dev_test_feed_action
         )
         self.register_action(
