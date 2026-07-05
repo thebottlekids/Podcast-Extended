@@ -67,32 +67,19 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const playEpisode = (episode: Episode) => {
-    console.log('playEpisode called with:', episode);
-    console.log('Episode audio flags:', {
-      has_processed_audio: episode.has_processed_audio,
-      has_unprocessed_audio: episode.has_unprocessed_audio,
-      download_url: episode.download_url
-    });
-
     if (!episode.has_processed_audio) {
-      console.log('No processed audio available for episode');
       dispatch({ type: 'SET_ERROR', payload: 'Post needs to be processed first' });
       return;
     }
 
-    console.log('Setting episode and loading state');
     dispatch({ type: 'SET_EPISODE', payload: episode });
     dispatch({ type: 'SET_LOADING', payload: true });
-    
+
     if (audioRef.current) {
       // Use the new API endpoint for audio
       const audioUrl = feedsApi.getPostAudioUrl(episode.guid);
-      console.log('Using API audio URL:', audioUrl);
-      
       audioRef.current.src = audioUrl;
       audioRef.current.load();
-    } else {
-      console.log('audioRef.current is null');
     }
   };
 

@@ -68,11 +68,31 @@ export default function ReprocessButton({
         // Only audio processing selected
         response = await feedsApi.clearAudioProcessing(episodeGuid);
       } else if (selectedSteps.includes('adDetection') && selectedSteps.includes('audioProcessing') && !selectedSteps.includes('transcript')) {
-        // Ad detection + audio processing (no transcript)
-        await feedsApi.clearAdDetection(episodeGuid);
-        response = await feedsApi.clearAudioProcessing(episodeGuid);
+        // Ad detection + audio processing (no transcript). Both calls'
+        // responses must be checked -- a failed clearAdDetection that
+        // resolves (rather than rejects) with status: 'error' must not be
+        // silently dropped just because clearAudioProcessing succeeded.
+        const adResult = await feedsApi.clearAdDetection(episodeGuid);
+        const audioResult = await feedsApi.clearAudioProcessing(episodeGuid);
+        const isOk = (r: { status: string }) => r.status === 'success' || r.status === 'started';
+
+        if (!isOk(adResult) || !isOk(audioResult)) {
+          const messages = [
+            !isOk(adResult) ? adResult.message : null,
+            !isOk(audioResult) ? audioResult.message : null,
+          ].filter(Boolean).join('; ');
+          response = { status: 'error', message: messages || 'Failed to clear ad detection/audio processing' };
+        } else {
+          response = audioResult;
+        }
       } else {
-        // Any other combination - use full reprocess as fallback
+        // Any other combination -- currently {transcript, adDetection} and
+        // {transcript, audioProcessing} -- falls back to a full reprocess.
+        // This is correct today because transcript is step 1, so selecting
+        // it alongside a later step already implies redoing everything from
+        // there; it's implicit rather than explicitly matched, so a future
+        // 4th processing step would silently route here too -- revisit this
+        // fallback if that happens.
         response = await feedsApi.reprocessPost(episodeGuid);
       }
 

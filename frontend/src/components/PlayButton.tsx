@@ -24,12 +24,6 @@ export default function PlayButton({ episode, className = '' }: PlayButtonProps)
   const isCurrentEpisode = currentEpisode?.id === episode.id;
   const canPlay = episode.has_processed_audio;
 
-  console.log(`PlayButton for "${episode.title}":`, {
-    has_processed_audio: episode.has_processed_audio,
-    whitelisted: episode.whitelisted,
-    canPlay
-  });
-
   const getDisabledReason = () => {
     if (!episode.has_processed_audio) {
       return 'Episode not processed yet';
@@ -38,17 +32,11 @@ export default function PlayButton({ episode, className = '' }: PlayButtonProps)
   };
 
   const handleClick = () => {
-    console.log('PlayButton clicked for episode:', episode.title);
-    console.log('canPlay:', canPlay);
-    console.log('isCurrentEpisode:', isCurrentEpisode);
-    
     if (!canPlay) return;
-    
+
     if (isCurrentEpisode) {
-      console.log('Toggling play/pause for current episode');
       togglePlayPause();
     } else {
-      console.log('Playing new episode');
       playEpisode(episode);
     }
   };
