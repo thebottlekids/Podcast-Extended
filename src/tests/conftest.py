@@ -93,7 +93,7 @@ def mock_transcription_manager() -> MagicMock:
 @pytest.fixture
 def mock_ad_classifier() -> MagicMock:
     classifier = MagicMock(spec=AdClassifier)
-    classifier.classify.return_value = None  # classify method has no return value
+    classifier.classify.return_value = True  # True == classification succeeded
     return classifier
 
 

@@ -8,7 +8,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import litellm
 from jinja2 import Template
-from litellm.exceptions import InternalServerError
+from litellm.exceptions import (
+    APIConnectionError,
+    InternalServerError,
+    RateLimitError,
+    ServiceUnavailableError,
+    Timeout,
+)
 from litellm.types.utils import Choices
 from pydantic import ValidationError
 from sqlalchemy import and_
@@ -130,7 +136,7 @@ class AdClassifier:
         system_prompt: str,
         user_prompt_template: Template,
         post: Post,
-    ) -> None:
+    ) -> bool:
         """
         Classifies transcript segments to identify ad segments.
 
@@ -139,6 +145,13 @@ class AdClassifier:
             system_prompt: System prompt for the LLM
             user_prompt_template: User prompt template for the LLM
             post: Post containing the podcast to classify
+
+        Returns:
+            True if every segment was classified successfully. False if
+            classification was aborted early (exception) or left incomplete
+            (safety-limit/no-progress break) -- callers must treat a False
+            return as a failed processing step rather than proceeding to cut
+            audio based on a partial/empty set of ad identifications.
         """
         self.logger.info(
             f"Starting ad classification for post {post.id} with {len(transcript_segments)} segments."
@@ -148,7 +161,7 @@ class AdClassifier:
             self.logger.info(
                 f"No transcript segments to classify for post {post.id}. Skipping."
             )
-            return
+            return True
 
         classify_params = ClassifyParams(
             system_prompt=system_prompt,
@@ -183,6 +196,17 @@ class AdClassifier:
                     )
                     break
 
+            classification_complete = current_index >= total_segments
+            if not classification_complete:
+                self.logger.error(
+                    "Classification incomplete for post %s: processed %d/%d "
+                    "segments before stopping (iteration_count=%d).",
+                    post.id,
+                    current_index,
+                    total_segments,
+                    iteration_count,
+                )
+
             # Expand neighbors using bulk operations
             # NOTE: Use self.db_session.query() instead of self.identification_query
             # to ensure all operations use the same session consistently.
@@ -216,9 +240,11 @@ class AdClassifier:
             if self.boundary_refiner:
                 self._refine_boundaries(transcript_segments, post)
 
+            return classification_complete
+
         except ClassifyException as e:
             self.logger.error(f"Classification failed for post {post.id}: {e}")
-            return
+            return False
 
     def _step(
         self,
@@ -970,10 +996,23 @@ class AdClassifier:
 
     def _is_retryable_error(self, error: Exception) -> bool:
         """Determine if an error should be retried."""
-        if isinstance(error, InternalServerError):
+        if isinstance(
+            error,
+            (
+                InternalServerError,
+                RateLimitError,
+                ServiceUnavailableError,
+                APIConnectionError,
+                Timeout,
+            ),
+        ):
             return True
 
-        # Check for retryable HTTP errors in other exception types
+        if getattr(error, "status_code", None) in (429, 503):
+            return True
+
+        # Fallback substring matching for provider/exception shapes that
+        # don't map cleanly onto the litellm exception types checked above.
         error_str = str(error).lower()
         return (
             "503" in error_str

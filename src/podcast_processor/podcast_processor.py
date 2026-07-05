@@ -231,12 +231,21 @@ class PodcastProcessor:
                 self.logger.info(f"Processing podcast: {post} complete")
                 return processed_audio_path
             finally:
-                # Release lock using cached GUID without touching ORM state after potential rollback
+                # Release lock using cached GUID without touching ORM state after potential rollback.
+                # Also drop the dict entry once released so PodcastProcessor.locks
+                # doesn't grow without bound over the process's lifetime (one entry
+                # per distinct post GUID ever processed). This is safe because
+                # _acquire_processing_lock() performs its entire get-or-create-and-
+                # acquire sequence under the same lock_lock mutex, so there's no
+                # window where another thread could be holding a reference to a
+                # lock object that gets removed out from under it here.
                 try:
                     if cached_post_guid is not None:
-                        lock = PodcastProcessor.locks.get(cached_post_guid)
-                        if lock is not None and lock.locked():
-                            lock.release()
+                        with PodcastProcessor.lock_lock:
+                            lock = PodcastProcessor.locks.get(cached_post_guid)
+                            if lock is not None and lock.locked():
+                                lock.release()
+                                PodcastProcessor.locks.pop(cached_post_guid, None)
                 except Exception:
                     # Best-effort lock release; avoid masking original exceptions
                     pass
@@ -303,15 +312,22 @@ class PodcastProcessor:
         # Use post GUID as lock key instead of file path for better granularity
         lock_key = post_guid
 
-        # Acquire lock (this is where we cancel existing jobs if we can get the lock)
-        locked = False
+        # Acquire lock (this is where we cancel existing jobs if we can get the
+        # lock). The get-or-create-and-acquire sequence happens entirely under
+        # lock_lock so it can never race with the cleanup-on-release logic in
+        # process()'s finally block (which also removes dict entries under the
+        # same mutex once a lock is released and no longer needed).
         with PodcastProcessor.lock_lock:
-            if lock_key not in PodcastProcessor.locks:
-                PodcastProcessor.locks[lock_key] = threading.Lock()
-                PodcastProcessor.locks[lock_key].acquire(blocking=False)
+            existing_lock = PodcastProcessor.locks.get(lock_key)
+            if existing_lock is None:
+                new_lock = threading.Lock()
+                new_lock.acquire(blocking=False)
+                PodcastProcessor.locks[lock_key] = new_lock
                 locked = True
+            else:
+                locked = existing_lock.acquire(blocking=False)
 
-        if not locked and not PodcastProcessor.locks[lock_key].acquire(blocking=False):
+        if not locked:
             raise ProcessorException("Processing job in progress")
 
         # Cancel existing jobs since we got the lock
@@ -375,7 +391,7 @@ class PodcastProcessor:
         transcript_segments: List[TranscriptSegment],
         cancel_callback: Optional[Callable[[], bool]] = None,
     ) -> bool:
-        """Classify ad segments if not already done. Returns False if cancelled."""
+        """Classify ad segments if not already done. Returns False if cancelled or classification failed."""
         # Check if we already have ad detection results
         if self._has_existing_ad_detection(post):
             self.logger.info(
@@ -385,7 +401,14 @@ class PodcastProcessor:
                 job, "running", 3, "Ad detection already complete", 75.0
             )
         else:
-            self._classify_ad_segments(post, job, transcript_segments)
+            classification_succeeded = self._classify_ad_segments(
+                post, job, transcript_segments
+            )
+            if not classification_succeeded:
+                self.status_manager.update_job_status(
+                    job, "failed", 3, "Ad classification failed"
+                )
+                return False
 
         self._raise_if_cancelled(job, 3, cancel_callback)
         return True
@@ -484,7 +507,7 @@ class PodcastProcessor:
         post: Post,
         job: ProcessingJob,
         transcript_segments: List[TranscriptSegment],
-    ) -> None:
+    ) -> bool:
         """
         Classify ad segments in the transcript.
 
@@ -492,6 +515,10 @@ class PodcastProcessor:
             post: The Post object being processed
             job: The ProcessingJob for tracking
             transcript_segments: The transcript segments to classify
+
+        Returns:
+            True if classification completed successfully, False if it was
+            aborted or left incomplete.
         """
         self.status_manager.update_job_status(
             job, "running", 3, "Identifying ads", 75.0
@@ -500,7 +527,7 @@ class PodcastProcessor:
             DEFAULT_USER_PROMPT_TEMPLATE_PATH
         )
         system_prompt = self.get_system_prompt(DEFAULT_SYSTEM_PROMPT_PATH)
-        self.ad_classifier.classify(
+        return self.ad_classifier.classify(
             transcript_segments=transcript_segments,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt_template,
