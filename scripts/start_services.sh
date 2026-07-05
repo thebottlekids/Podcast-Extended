@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# Generate a random IPC authkey once per container boot if one wasn't supplied,
+# so the writer and web processes (started below) share the same key via the
+# environment instead of both falling back independently to app/ipc.py's
+# hardcoded default (which would otherwise ship a public secret in production).
+if [ -z "${PODLY_IPC_AUTHKEY}" ]; then
+	export PODLY_IPC_AUTHKEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+fi
+
 # 1. Start Writer Service in background
 echo "Starting Writer Service..."
 export PYTHONPATH="/app/src${PYTHONPATH:+:$PYTHONPATH}"

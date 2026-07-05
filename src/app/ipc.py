@@ -17,6 +17,13 @@ def _get_default_authkey() -> bytes:
     # This key is only used for localhost IPC between the web and writer processes.
     # It must be identical across processes, otherwise Manager proxy calls can fail
     # with AuthenticationError ('digest sent was rejected').
+    #
+    # In the container, scripts/start_services.sh generates a random key once per
+    # boot and exports PODLY_IPC_AUTHKEY before launching either process, so both
+    # inherit the same value. The "podly_secret" fallback below only matters for
+    # non-containerized local dev (e.g. running the writer and web processes
+    # separately via pipenv) where that entrypoint doesn't run -- it is not a
+    # meaningful secret and must not be relied on in production.
     raw = os.environ.get("PODLY_IPC_AUTHKEY", "podly_secret")
     return raw.encode("utf-8")
 
