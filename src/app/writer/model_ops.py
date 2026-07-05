@@ -4,6 +4,15 @@ from typing import Any
 
 from app.writer.protocol import WriteCommand, WriteCommandType, WriteResult
 
+# Fields no generic CREATE/UPDATE command may ever set, regardless of model.
+# Today every live caller of writer_client.create()/update() passes fixed,
+# hardcoded field dicts from trusted internal code (auth/user management goes
+# through separate named actions, not this generic path) -- this denylist is
+# a safety net so a future route bug that forwards user-supplied JSON straight
+# into writer_client.create()/update() can't escalate privileges or tamper
+# with credentials via mass assignment.
+_SENSITIVE_FIELDS = frozenset({"password_hash", "role", "is_admin", "id", "created_at"})
+
 
 def execute_model_command(
     *,
@@ -12,7 +21,8 @@ def execute_model_command(
     db_session: Any,
 ) -> WriteResult:
     if cmd.type == WriteCommandType.CREATE:
-        obj = model_cls(**cmd.data)
+        safe_data = {k: v for k, v in cmd.data.items() if k not in _SENSITIVE_FIELDS}
+        obj = model_cls(**safe_data)
         db_session.add(obj)
         db_session.flush()
         data = {"id": obj.id} if hasattr(obj, "id") else None
@@ -30,7 +40,7 @@ def execute_model_command(
             )
 
         for k, v in cmd.data.items():
-            if k != "id" and hasattr(obj, k):
+            if k not in _SENSITIVE_FIELDS and hasattr(obj, k):
                 setattr(obj, k, v)
         return WriteResult(cmd.id, True)
 
