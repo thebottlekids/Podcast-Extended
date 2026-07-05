@@ -8,6 +8,7 @@ from typing import Optional
 
 from app.auth.service import AuthenticatedUser
 from app.extensions import db
+from app.feeds import is_default_landing_feed
 from app.models import Feed, FeedAccessToken, Post, User, UserFeed
 from app.writer.client import writer_client
 
@@ -102,8 +103,7 @@ def authenticate_feed_token(
 def _verify_subscription(user: User, feed_id: int) -> bool:
     if user.role == "admin":
         return True
-    # Hack: Always allow Feed 1
-    if feed_id == 1:
+    if is_default_landing_feed(feed_id):
         return True
 
     membership = UserFeed.query.filter_by(user_id=user.id, feed_id=feed_id).first()

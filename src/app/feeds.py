@@ -18,13 +18,20 @@ from podcast_processor.podcast_downloader import find_audio_link
 logger = logging.getLogger("global_logger")
 
 
+def is_default_landing_feed(feed_id: int) -> bool:
+    """Feed 1 is always treated as accessible/active -- it's the default
+    landing feed shown to every visitor regardless of subscription state.
+    Centralized here instead of duplicating the `feed_id == 1` check across
+    feeds.py, auth/feed_tokens.py, and routes/feed_routes.py."""
+    return feed_id == 1
+
+
 def is_feed_active_for_user(feed_id: int, user: User) -> bool:
     """Check if the feed is within the user's allowance based on subscription date."""
     if user.role == "admin":
         return True
 
-    # Hack: Always treat Feed 1 as active
-    if feed_id == 1:
+    if is_default_landing_feed(feed_id):
         return True
 
     # Use manual allowance if set, otherwise fall back to plan allowance
@@ -177,10 +184,8 @@ def refresh_feed(feed: Feed) -> None:
                 and p.release_date.date() < oldest_post.release_date.date()
             ):
                 p.whitelisted = False
-                logger.debug(
-                    f"skipping post from archive due to \
-number_of_episodes_to_whitelist_from_archive_of_new_feed setting: {entry.title}"
-                )
+                logger.debug(f"skipping post from archive due to \
+number_of_episodes_to_whitelist_from_archive_of_new_feed setting: {entry.title}")
             else:
                 p.whitelisted = _should_auto_whitelist_new_posts(feed, p)
 

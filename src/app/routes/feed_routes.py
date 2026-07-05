@@ -34,6 +34,7 @@ from app.feeds import (
     add_or_refresh_feed,
     generate_aggregate_feed_xml,
     generate_feed_xml,
+    is_default_landing_feed,
     is_feed_active_for_user,
     refresh_feed,
 )
@@ -1017,8 +1018,7 @@ def _serialize_feed(
         current_user and getattr(current_user, "id", None) in member_ids
     )
 
-    # Hack: Always treat Feed 1 as a member
-    if feed.id == 1 and (current_user or not auth_enabled):
+    if is_default_landing_feed(feed.id) and (current_user or not auth_enabled):
         is_member = True
 
     is_active_subscription = False
