@@ -4,6 +4,7 @@ import flask
 from flask import Blueprint, request
 from flask.typing import ResponseReturnValue
 
+from app.auth.guards import require_admin
 from app.extensions import db
 from app.jobs_manager import get_jobs_manager
 from app.jobs_manager_run_service import build_run_status_snapshot
@@ -44,6 +45,10 @@ def api_job_manager_status() -> ResponseReturnValue:
 
 @jobs_bp.route("/api/jobs/<string:job_id>/cancel", methods=["POST"])
 def api_cancel_job(job_id: str) -> ResponseReturnValue:
+    _, error_response = require_admin("cancel this job")
+    if error_response:
+        return error_response
+
     try:
         result = get_jobs_manager().cancel_job(job_id)
         status_code = (
@@ -84,6 +89,10 @@ def api_cleanup_preview() -> ResponseReturnValue:
 
 @jobs_bp.route("/api/jobs/cleanup/run", methods=["POST"])
 def api_run_cleanup() -> ResponseReturnValue:
+    _, error_response = require_admin("run cleanup")
+    if error_response:
+        return error_response
+
     retention = getattr(runtime_config, "post_cleanup_retention_days", None)
     if retention is None or retention <= 0:
         return flask.jsonify(

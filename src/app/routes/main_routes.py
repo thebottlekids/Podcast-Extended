@@ -1,19 +1,12 @@
-import logging
 import os
 
 import flask
 from flask import Blueprint, send_from_directory
 
 from app.auth.guards import require_admin
-from app.extensions import db
-from app.models import Feed, Post, User
+from app.models import Feed, User
 from app.runtime_config import config
 from app.writer.client import writer_client
-
-logger = logging.getLogger("global_logger")
-
-logger = logging.getLogger("global_logger")
-
 
 main_bp = Blueprint("main", __name__)
 
@@ -130,34 +123,3 @@ def whitelist_all(f_id: str, val: str) -> flask.Response:
             )
         )
     return flask.make_response("", 200)
-
-
-@main_bp.route("/set_whitelist/<string:p_guid>/<val>", methods=["GET"])
-def set_whitelist(p_guid: str, val: str) -> flask.Response:
-    logger.info(f"Setting whitelist status for post with GUID: {p_guid} to {val}")
-    post = Post.query.filter_by(guid=p_guid).first()
-    if post is None:
-        return flask.make_response(("Post not found", 404))
-
-    new_status = val.lower() == "true"
-    try:
-        result = writer_client.update(
-            "Post", post.id, {"whitelisted": new_status}, wait=True
-        )
-        if not result or not result.success:
-            raise RuntimeError(getattr(result, "error", "Unknown writer error"))
-        db.session.expire(post)
-    except Exception:  # pylint: disable=broad-except
-        return flask.make_response(
-            (
-                flask.jsonify(
-                    {
-                        "error": "Database busy, please retry",
-                        "retry_after_seconds": 1,
-                    }
-                ),
-                503,
-            )
-        )
-
-    return index()
