@@ -1,11 +1,22 @@
 - config audit & testing (advanced and basic)
-- reaudit security + testing
 - ci.sh
 - test railway
 - login for public facing
 - podcast rss search
+- DB cascade-delete FKs: no model has ondelete=CASCADE, cascade deletes are
+  hand-rolled in writer/actions/feeds.py:delete_feed_cascade_action; adding
+  real FK cascades needs a new Alembic migration (generate via
+  scripts/create_migration.sh, don't hand-write it)
+- rename project to "Faded Reel" (scope not yet decided -- cosmetic strings
+  only vs. full rename of repo/Docker images/package paths)
 
 [done] 'basic' config page - just put in groq api key + test + save on populate
 [done] also show if api key is set or blank (KeyStatusBadge in DefaultTab)
 [done] move host/port/threads to docker config (PORT added to all compose env sections)
 [done] test hide 'local' whisper in lite build (handled via /api/config/whisper-capabilities; frontend hides 'local' option when unavailable)
+[done] reaudit security + testing (harden/beta-fixes branch: env-var override
+  validation, ad-classification silent-failure fix, admin checks on job
+  routes, dead set_whitelist route removed, IPC authkey, writer
+  mass-assignment allow-list, reliability fixes, deployment/infra fixes --
+  see .agents/04_processing_pipeline.md, 05_writer_service.md,
+  06_authentication.md, 08_configuration.md for updated behavior docs)

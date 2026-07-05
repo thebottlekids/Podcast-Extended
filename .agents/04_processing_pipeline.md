@@ -55,6 +55,19 @@ Uses LLM to identify ad segments in transcripts.
 - Configurable concurrency limits
 - Token-per-minute rate limiting
 
+**`classify()` return value:** returns `bool`, `True` only if every segment
+was classified (the loop reached the end of the transcript with no
+exception and no no-progress break). `PodcastProcessor._classify_ad_segments_if_needed`
+checks this and marks the job `"failed"` instead of proceeding to the cut
+step -- a classification that's aborted or left incomplete no longer ships
+the episode unedited with no error surfaced.
+
+**Retry classification (`_is_retryable_error`):** checks real litellm
+exception types (`RateLimitError`, `ServiceUnavailableError`,
+`APIConnectionError`, `Timeout`, `InternalServerError`) and `.status_code`
+(429/503) first, falling back to substring matching on the stringified
+error only as a last resort.
+
 ### 4. BoundaryRefiner (`boundary_refiner.py`)
 Fine-tunes ad segment boundaries for precise cutting.
 
@@ -90,6 +103,17 @@ Downloads podcast episodes from RSS feeds.
 - Sanitizes filenames
 - Resume capability
 - Progress tracking
+
+**`sanitize_title()`:** falls back to a stable hash-based name
+(`untitled_<sha1-prefix>`) when the sanitized title would otherwise be
+empty/whitespace-only (e.g. an all-emoji RSS title), and truncates to 150
+chars.
+
+**Missing/invalid download URL:** raises `DownloadError` (a plain exception
+defined in this module), not `flask.abort()` -- this code runs in a
+background worker thread with no Flask request context.
+`PodcastProcessor.process()`'s generic exception handler catches it and
+marks the job failed.
 
 ### 7. ProcessingStatusManager (`processing_status_manager.py`)
 Tracks and reports processing progress.
@@ -154,8 +178,16 @@ Processing behavior controlled via:
 
 - **Retry Logic**: Exponential backoff for API failures
 - **Segment Recovery**: Partial results saved on failure
-- **Lock Management**: Automatic lock release on error
-- **Status Updates**: Real-time job status tracking
+- **Lock Management**: Per-post-GUID lock acquire/release/cleanup is atomic
+  under `PodcastProcessor.lock_lock` -- the dict entry is removed once
+  released so it doesn't grow unbounded over the process's lifetime. Note:
+  there's a known, documented-but-unfixed gap between this in-process lock
+  and the DB-level job-cancellation flag -- a stale cancel request can still
+  race a completing job's final status write (see comments around
+  `_acquire_processing_lock` / `cancel_existing_jobs`).
+- **Status Updates**: Real-time job status tracking; classification failures
+  now mark the job `"failed"` rather than silently completing (see
+  AdClassifier above)
 
 ## Performance Considerations
 

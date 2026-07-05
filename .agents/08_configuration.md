@@ -134,15 +134,45 @@ def ensure_defaults_and_hydrate():
 **On First Boot:**
 - Env vars written to database if table empty
 - Env vars take precedence over defaults
+- This initial seed is **not validated** -- whatever's in the env vars goes in as-is
 
 **After First Boot:**
 - Database values used
-- Env vars ignored (unless hash mismatch)
-- Changes via web UI update database
+- Env vars re-checked on **every boot** (not just first boot) via a hash of
+  ~20 tracked env vars (`app/config_store.py:_check_and_apply_env_changes`)
+- If the hash changed since last boot, matching env vars are force-written
+  back into the DB, **overwriting whatever's there** -- except for
+  `LLM_MODEL`/`LLM_API_KEY`, which are validated first (see below)
+- Changes via web UI update database directly and aren't affected by this
 
 **Force Reseed:**
 - Delete database or settings rows
-- Or set new env vars (hash change detected)
+- Or set/change any of the ~20 hashed env vars (hash change detected) --
+  this can be triggered by an unrelated env var, not just LLM/Whisper ones
+
+### LLM env-var validation (`_looks_like_valid_llm_model`, `_looks_like_llm_api_key`)
+
+`LLM_MODEL` and `LLM_API_KEY` are validated before either the force-reseed
+path or the in-memory runtime hydration (`_apply_llm_model_override`) apply
+them:
+- `LLM_MODEL` is rejected (and the existing DB value kept) if it doesn't
+  start with a recognized LiteLLM provider prefix (`ollama/`, `openai/`,
+  `anthropic/`, `groq/`, etc.) -- a bare model name like `qwen2.5:14b` fails
+  at call time with `LLM Provider NOT provided`.
+- `LLM_API_KEY` is rejected if it looks like a model identifier rather than
+  a credential (guards against the two env vars getting swapped/confused
+  during setup).
+- Rejections are logged as warnings (`app/src/instance/logs/app.log`), not
+  silently dropped.
+
+This exists because a deployed container had exactly this swapped-value
+mistake (`LLM_MODEL=qwen2.5:14b`, `LLM_API_KEY=openai/qwen2.5:14b`) sitting
+dormant in its env vars -- harmless only because the hash hadn't changed,
+but any future unrelated env var change would have silently force-written
+the broken values back over a correctly-configured DB and broken ad
+classification with no warning. Whisper env overrides are not validated the
+same way (no provider-prefix convention to check against) -- only basic
+non-empty/type guards apply there.
 
 ## Important Files
 

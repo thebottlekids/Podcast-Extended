@@ -159,14 +159,20 @@ On first startup with auth enabled:
 ## Guards & Decorators
 
 ### Route Protection
+`require_admin` (`app/auth/guards.py`) is a function, not a decorator --
+call it at the top of the route body and return its error response if present:
 ```python
-from app.auth import require_admin
+from app.auth.guards import require_admin
 
-@require_admin
 def admin_route():
-    # Only admins can access
-    pass
+    user, error_response = require_admin("do the thing")
+    if error_response:
+        return error_response
+    # Only admins reach here
 ```
+All state-mutating routes should call this, including background-job
+management (`/api/jobs/<id>/cancel`, `/api/jobs/cleanup/run` in
+`routes/jobs_routes.py` -- previously missing this check entirely).
 
 ### Feed Access Check
 ```python
@@ -174,6 +180,10 @@ def is_feed_active_for_user(feed_id, user):
     # Check if feed within user's allowance
     # Based on subscription date ordering
 ```
+
+Feed 1 is always treated as the default/landing feed regardless of
+subscription state. This is centralized in `app/feeds.py:is_default_landing_feed()`
+-- don't reintroduce inline `feed_id == 1` checks elsewhere.
 
 ## Security Considerations
 

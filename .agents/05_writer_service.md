@@ -181,10 +181,32 @@ result = writer_client.submit(cmd, wait=True)
 
 ## Error Handling
 
-- **Timeout**: Client raises TimeoutError after 10s default
+- **Timeout**: `submit()` returns a failed `WriteResult(success=False, error="Writer service did not respond (timeout)")`
+  after 10s default, instead of raising `TimeoutError` -- most callers only
+  check `result.success` and previously didn't catch the raised exception,
+  which could crash a job step ungracefully instead of surfacing a clean error.
 - **Rollback**: Failed transactions auto-rollback
 - **Dead Letter**: Failed commands logged for inspection
 - **Local Fallback**: Test mode executes directly
+
+## Mass-Assignment Protection
+
+`execute_model_command` (`writer/model_ops.py`) denies a fixed set of
+sensitive fields (`password_hash`, `role`, `is_admin`, `id`, `created_at`)
+on both CREATE and UPDATE, regardless of target model. No live caller relies
+on setting these through the generic CRUD path today (user/auth writes go
+through dedicated named actions, e.g. `users_action`), so this is a safety
+net against a future route bug forwarding user-supplied JSON straight into
+`writer_client.create()`/`.update()`.
+
+## IPC Authkey
+
+`app/ipc.py`'s `_get_default_authkey()` falls back to a hardcoded string if
+`PODLY_IPC_AUTHKEY` isn't set. In the container, `scripts/start_services.sh`
+generates a random key once per boot and exports it before starting either
+the writer or web process, so both inherit the same real key. The hardcoded
+fallback only matters for non-containerized local dev where that entrypoint
+script doesn't run.
 
 ## Deployment
 

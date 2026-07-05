@@ -113,4 +113,4 @@ See [08_configuration.md](08_configuration.md) for configuration details.
 
 ---
 
-*This documentation is maintained as part of the Podcast-AdBlock project. Last updated: 2025-01-31*
+*This documentation is maintained as part of the Podcast-AdBlock project. Last updated: 2026-07-05*
