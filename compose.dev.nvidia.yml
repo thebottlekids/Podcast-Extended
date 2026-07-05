@@ -1,8 +1,8 @@
 services:
-  podly:
+  podcast-adblock:
     extends:
       file: compose.dev.cpu.yml
-      service: podly
+      service: podcast-adblock
     env_file:
       - ./.env.local
     environment:

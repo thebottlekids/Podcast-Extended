@@ -9,4 +9,12 @@ export PYTHONPATH="$REPO_ROOT/src"
 # Default to downgrading one revision if not specified
 REVISION=${1:-"-1"}
 
-pipenv run flask --app app db downgrade "$REVISION"
+read -r -p "Downgrade database at $PODLY_INSTANCE_DIR to revision $REVISION now? [y/N]: " response
+case "$response" in
+    [yY][eE][sS]|[yY])
+        pipenv run flask --app app db downgrade "$REVISION"
+        ;;
+    *)
+        echo "Downgrade cancelled."
+        ;;
+esac

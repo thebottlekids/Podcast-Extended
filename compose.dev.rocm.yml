@@ -1,8 +1,8 @@
 services:
-  podly:
+  podcast-adblock:
     extends:
       file: compose.dev.cpu.yml
-      service: podly
+      service: podcast-adblock
     env_file:
       - ./.env.local
     devices:
@@ -20,11 +20,6 @@ services:
       - HSA_OVERRIDE_GFX_VERSION=10.3.0
     security_opt:
       - seccomp=unconfined
-
-  podcast-adblock:
-    extends:
-      file: compose.dev.cpu.yml
-      service: podcast-adblock
 
 networks:
   default:

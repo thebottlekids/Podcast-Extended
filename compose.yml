@@ -3,7 +3,7 @@ services:
     container_name: podcast-adblock
     ports:
       - "5001:5001"
-    image: ghcr.io/mebezac/podcast-adblock:${BRANCH:-main-latest}
+    image: ghcr.io/thebottlekids/podcast-adblock:${BRANCH:-main-latest}
     volumes:
       - ./src/instance:/app/src/instance
     env_file:

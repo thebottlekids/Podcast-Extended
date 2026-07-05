@@ -6,7 +6,7 @@ set -euo pipefail
 BRANCH=$(git rev-parse --abbrev-ref HEAD | tr '/' '_')
 
 # Allow overriding image/owner/builder via env vars
-IMAGE=${IMAGE:-ghcr.io/mebezac/podcast-adblock}
+IMAGE=${IMAGE:-ghcr.io/thebottlekids/podcast-adblock}
 BUILDER=${BUILDER:-podly_builder}
 
 # Ensure a docker-container buildx builder for multi-arch builds
