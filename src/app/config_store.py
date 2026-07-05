@@ -32,6 +32,48 @@ from shared.config import (
 logger = logging.getLogger("global_logger")
 
 
+# LiteLLM routes calls based on a provider prefix on the model string (e.g.
+# "ollama/qwen2.5:14b"). A bare model name with no prefix fails at call time
+# with "LLM Provider NOT provided". These helpers reject env-var values that
+# would silently write a broken LLM config into the DB.
+_LITELLM_PROVIDER_PREFIXES = (
+    "ollama/",
+    "openai/",
+    "azure/",
+    "anthropic/",
+    "groq/",
+    "bedrock/",
+    "vertex_ai/",
+    "gemini/",
+    "cohere/",
+    "huggingface/",
+    "together_ai/",
+    "replicate/",
+    "openrouter/",
+    "mistral/",
+    "deepseek/",
+    "xai/",
+)
+
+
+def _looks_like_valid_llm_model(model: Optional[str]) -> bool:
+    """Best-effort check that an LLM model string has a recognized provider prefix."""
+    if not model or not model.strip():
+        return False
+    return any(model.startswith(prefix) for prefix in _LITELLM_PROVIDER_PREFIXES)
+
+
+def _looks_like_llm_api_key(key: Optional[str]) -> bool:
+    """Reject values that look like a model identifier rather than a credential.
+
+    Guards against the swapped-env-var mistake where LLM_API_KEY ends up set to
+    something like "openai/qwen2.5:14b" instead of a real API key.
+    """
+    if not key or not key.strip():
+        return False
+    return not any(key.startswith(prefix) for prefix in _LITELLM_PROVIDER_PREFIXES)
+
+
 def _is_empty(value: Any) -> bool:
     return value is None or value == ""
 
@@ -880,8 +922,18 @@ def _apply_whisper_env_overrides(cfg: PydanticConfig) -> None:
 
 def _apply_llm_model_override(cfg: PydanticConfig) -> None:
     env_llm_model = os.environ.get("LLM_MODEL")
-    if env_llm_model:
+    if not env_llm_model:
+        return
+    if _looks_like_valid_llm_model(env_llm_model):
         cfg.llm_model = env_llm_model
+    else:
+        logger.warning(
+            "Ignoring LLM_MODEL env override %r for in-memory runtime config: "
+            "missing a recognized litellm provider prefix (e.g. 'ollama/', "
+            "'openai/'). Keeping DB-hydrated value %r.",
+            env_llm_model,
+            cfg.llm_model,
+        )
 
 
 def _configure_local_whisper(cfg: PydanticConfig) -> None:
@@ -1165,13 +1217,28 @@ def _apply_llm_env_overrides(llm: LLMSettings) -> bool:
     # It can work with any provider (OpenAI, Groq, Anthropic, etc.) via openai_base_url
     env_llm_key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
     if env_llm_key:
-        llm.llm_api_key = env_llm_key
-        changed = True
+        if _looks_like_llm_api_key(env_llm_key):
+            llm.llm_api_key = env_llm_key
+            changed = True
+        else:
+            logger.warning(
+                "Ignoring LLM_API_KEY/OPENAI_API_KEY env override: value looks "
+                "like a model identifier, not an API key. Leaving existing DB "
+                "value in place."
+            )
 
     env_llm_model = os.environ.get("LLM_MODEL")
     if env_llm_model:
-        llm.llm_model = env_llm_model
-        changed = True
+        if _looks_like_valid_llm_model(env_llm_model):
+            llm.llm_model = env_llm_model
+            changed = True
+        else:
+            logger.warning(
+                "Ignoring LLM_MODEL env override %r: missing a recognized "
+                "litellm provider prefix (e.g. 'ollama/', 'openai/'). Leaving "
+                "existing DB value in place to avoid breaking ad classification.",
+                env_llm_model,
+            )
 
     env_openai_base_url = os.environ.get("OPENAI_BASE_URL")
     if env_openai_base_url:
