@@ -4,6 +4,7 @@ import pytest
 
 from app.models import Feed, Post
 from podcast_processor.podcast_downloader import (
+    DownloadError,
     PodcastDownloader,
     find_audio_link,
     sanitize_title,
@@ -62,7 +63,22 @@ def test_sanitize_title():
     assert (
         sanitize_title("123-ABC_DEF.mp3") == "123ABCDEFmp3"
     )  # Fixed expected output to match actual behavior
-    assert sanitize_title("") == ""
+
+
+def test_sanitize_title_falls_back_for_empty_result():
+    # An empty/whitespace-only/all-punctuation title would otherwise produce
+    # an empty filename or directory name -- fall back to a stable hash of
+    # the original title instead.
+    assert sanitize_title("") != ""
+    assert sanitize_title("") == sanitize_title("")  # deterministic
+    assert sanitize_title("!@#$%^&*()") != ""
+    assert sanitize_title("   ") != ""
+
+
+def test_sanitize_title_truncates_long_titles():
+    long_title = "A" * 500
+    result = sanitize_title(long_title)
+    assert len(result) <= 150
 
 
 def test_get_and_make_download_path(downloader):
@@ -161,19 +177,19 @@ def test_download_episode_download_failed(mock_get, test_post, downloader, app):
 
 
 @mock.patch("podcast_processor.podcast_downloader.validators.url")
-@mock.patch("podcast_processor.podcast_downloader.abort")
-def test_download_episode_invalid_url(
-    mock_abort, mock_validator, test_post, downloader, app
-):
+def test_download_episode_invalid_url(mock_validator, test_post, downloader, app):
     with app.app_context():
         # Make the validator fail
         mock_validator.return_value = False
 
         expected_path = downloader.get_and_make_download_path(test_post.title)
-        downloader.download_episode(test_post, dest_path=str(expected_path))
 
-        # Check that abort was called with 404
-        mock_abort.assert_called_once_with(404)
+        # A missing/invalid download URL raises a plain domain exception
+        # (not flask.abort(), since this runs in a background worker thread
+        # with no Flask request context) that PodcastProcessor.process()'s
+        # generic exception handler catches and reports as a failed job.
+        with pytest.raises(DownloadError):
+            downloader.download_episode(test_post, dest_path=str(expected_path))
 
 
 @mock.patch("podcast_processor.podcast_downloader.requests.get")

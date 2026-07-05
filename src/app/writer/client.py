@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from queue import Empty
@@ -8,6 +9,8 @@ from flask import current_app
 from app.ipc import make_client_manager
 from app.writer.model_ops import execute_model_command
 from app.writer.protocol import WriteCommand, WriteCommandType, WriteResult
+
+logger = logging.getLogger("global_logger")
 
 
 class WriterClient:
@@ -150,8 +153,21 @@ class WriterClient:
         if wait:
             try:
                 return reply_q.get(timeout=timeout)  # type: ignore
-            except Empty as exc:
-                raise TimeoutError("Writer service did not respond") from exc
+            except Empty:
+                # Convert to a normal (failed) WriteResult rather than raising
+                # TimeoutError -- most callers only check `result.success` and
+                # don't catch this, so an unhandled exception here would
+                # crash the caller's processing step instead of surfacing a
+                # clean, job-status-visible failure.
+                logger.warning(
+                    "Writer service did not respond within %ss for command %s (%s)",
+                    timeout,
+                    cmd.id,
+                    cmd.type,
+                )
+                return WriteResult(
+                    cmd.id, False, error="Writer service did not respond (timeout)"
+                )
         return None
 
     def create(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -8,7 +9,6 @@ from typing import Any, Iterator, Optional, Set
 
 import requests
 import validators
-from flask import abort
 
 from shared.interfaces import Post
 from shared.processing_paths import get_in_root
@@ -16,6 +16,14 @@ from shared.processing_paths import get_in_root
 logger = logging.getLogger(__name__)
 
 DOWNLOAD_DIR = str(get_in_root())
+
+
+class DownloadError(Exception):
+    """Raised when a podcast episode can't be downloaded (e.g. missing or
+    invalid download URL). This runs inside a background worker thread, not a
+    Flask request context, so it must not use flask.abort() -- the generic
+    exception handler in PodcastProcessor.process() catches this and marks
+    the job failed with a clear message."""
 
 
 class PodcastDownloader:
@@ -60,8 +68,7 @@ class PodcastDownloader:
         # If we get here, the file is missing or zero bytes -> perform download
         audio_link = post.download_url
         if audio_link is None or not validators.url(audio_link):
-            abort(404)
-            return None
+            raise DownloadError(f"Invalid or missing download URL for post {post.id}")
 
         self.logger.info(f"Downloading {audio_link} into {download_path}...")
         referer = "https://open.acast.com/" if "acast.com" in audio_link else None
@@ -107,9 +114,22 @@ class PodcastDownloader:
         return post_directory_path / post_filename
 
 
+_MAX_SANITIZED_TITLE_LENGTH = 150
+
+
 def sanitize_title(title: str) -> str:
-    """Sanitize a title for use in file paths."""
-    return re.sub(r"[^a-zA-Z0-9\s]", "", title)
+    """Sanitize a title for use in file paths.
+
+    Falls back to a stable hash of the original title when sanitization would
+    otherwise produce an empty/whitespace-only string (e.g. an all-emoji or
+    all-punctuation RSS title), and truncates to a safe max length so
+    extremely long titles can't blow past filesystem path limits.
+    """
+    sanitized = re.sub(r"[^a-zA-Z0-9\s]", "", title).strip()
+    if not sanitized:
+        digest = hashlib.sha1(title.encode("utf-8")).hexdigest()[:12]
+        sanitized = f"untitled_{digest}"
+    return sanitized[:_MAX_SANITIZED_TITLE_LENGTH]
 
 
 def find_audio_link(entry: Any) -> str:

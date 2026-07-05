@@ -293,12 +293,16 @@ Return JSON: {"refined_start": {{ad_start}}, "refined_end": {{ad_end}}, "start_r
         self, ad_start: float, ad_end: float, all_segments: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Get ±8 segments around ad"""
-        ad_segs = [s for s in all_segments if ad_start <= s["start_time"] <= ad_end]
-        if not ad_segs:
+        ad_seg_indices = [
+            i
+            for i, s in enumerate(all_segments)
+            if ad_start <= s["start_time"] <= ad_end
+        ]
+        if not ad_seg_indices:
             return []
 
-        first_idx = all_segments.index(ad_segs[0])
-        last_idx = all_segments.index(ad_segs[-1])
+        first_idx = ad_seg_indices[0]
+        last_idx = ad_seg_indices[-1]
 
         start_idx = max(0, first_idx - 8)
         end_idx = min(len(all_segments), last_idx + 9)

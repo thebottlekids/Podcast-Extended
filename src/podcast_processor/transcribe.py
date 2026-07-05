@@ -145,24 +145,26 @@ class OpenAIWhisperTranscriber(Transcriber):
         self.logger.info("[WHISPER_REMOTE] Processing %d chunks", len(chunks))
         all_segments: List[TranscriptionSegment] = []
 
-        for idx, chunk in enumerate(chunks):
-            chunk_path, offset = chunk
-            self.logger.info(
-                "[WHISPER_REMOTE] Processing chunk %d/%d: %s",
-                idx + 1,
-                len(chunks),
-                chunk_path,
-            )
-            segments = self.get_segments_for_chunk(str(chunk_path))
-            self.logger.info(
-                "[WHISPER_REMOTE] Chunk %d/%d complete: %d segments",
-                idx + 1,
-                len(chunks),
-                len(segments),
-            )
-            all_segments.extend(self.add_offset_to_segments(segments, offset))
+        try:
+            for idx, chunk in enumerate(chunks):
+                chunk_path, offset = chunk
+                self.logger.info(
+                    "[WHISPER_REMOTE] Processing chunk %d/%d: %s",
+                    idx + 1,
+                    len(chunks),
+                    chunk_path,
+                )
+                segments = self.get_segments_for_chunk(str(chunk_path))
+                self.logger.info(
+                    "[WHISPER_REMOTE] Chunk %d/%d complete: %d segments",
+                    idx + 1,
+                    len(chunks),
+                    len(segments),
+                )
+                all_segments.extend(self.add_offset_to_segments(segments, offset))
+        finally:
+            shutil.rmtree(audio_chunk_path, ignore_errors=True)
 
-        shutil.rmtree(audio_chunk_path)
         self.logger.info(
             "[WHISPER_REMOTE] Transcription complete: %d total segments",
             len(all_segments),
@@ -251,24 +253,26 @@ class GroqWhisperTranscriber(Transcriber):
         self.logger.info("[WHISPER_GROQ] Processing %d chunks", len(chunks))
         all_segments: List[GroqTranscriptionSegment] = []
 
-        for idx, chunk in enumerate(chunks):
-            chunk_path, offset = chunk
-            self.logger.info(
-                "[WHISPER_GROQ] Processing chunk %d/%d: %s",
-                idx + 1,
-                len(chunks),
-                chunk_path,
-            )
-            segments = self.get_segments_for_chunk(str(chunk_path))
-            self.logger.info(
-                "[WHISPER_GROQ] Chunk %d/%d complete: %d segments",
-                idx + 1,
-                len(chunks),
-                len(segments),
-            )
-            all_segments.extend(self.add_offset_to_segments(segments, offset))
+        try:
+            for idx, chunk in enumerate(chunks):
+                chunk_path, offset = chunk
+                self.logger.info(
+                    "[WHISPER_GROQ] Processing chunk %d/%d: %s",
+                    idx + 1,
+                    len(chunks),
+                    chunk_path,
+                )
+                segments = self.get_segments_for_chunk(str(chunk_path))
+                self.logger.info(
+                    "[WHISPER_GROQ] Chunk %d/%d complete: %d segments",
+                    idx + 1,
+                    len(chunks),
+                    len(segments),
+                )
+                all_segments.extend(self.add_offset_to_segments(segments, offset))
+        finally:
+            shutil.rmtree(audio_chunk_path, ignore_errors=True)
 
-        shutil.rmtree(audio_chunk_path)
         self.logger.info(
             "[WHISPER_GROQ] Transcription complete: %d total segments",
             len(all_segments),
