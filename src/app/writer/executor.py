@@ -119,6 +119,10 @@ class CommandExecutor:
         self.register_action(
             "touch_feed_access_token", writer_actions.touch_feed_access_token_action
         )
+        self.register_action(
+            "bulk_get_or_create_feed_access_tokens",
+            writer_actions.bulk_get_or_create_feed_access_tokens_action,
+        )
         self.register_action("create_user", writer_actions.create_user_action)
         self.register_action(
             "update_user_password", writer_actions.update_user_password_action

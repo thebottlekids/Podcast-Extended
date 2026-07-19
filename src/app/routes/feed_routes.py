@@ -45,6 +45,7 @@ from app.models import (
     User,
     UserFeed,
 )
+from app.opml import generate_opml
 from app.writer.client import writer_client
 from podcast_processor.podcast_downloader import sanitize_title
 from shared.processing_paths import get_in_root, get_srv_root
@@ -725,6 +726,27 @@ def get_feed_by_alt_or_url(something_or_rss: str) -> Response:
     return make_response(("Feed not found", 404))
 
 
+def _feeds_visible_to_user(user: Optional[User]) -> list[Feed]:
+    """Feeds the given user may see, mirroring the `/feeds` visibility rules.
+
+    Admins and no-auth mode see everything; regular users see joined feeds
+    plus the default landing feed.
+    """
+    if is_auth_enabled() and user is not None and user.role != "admin":
+        feeds = cast(
+            "list[Feed]",
+            Feed.query.join(UserFeed, UserFeed.feed_id == Feed.id)
+            .filter(UserFeed.user_id == user.id)
+            .all(),
+        )
+        # Hack: Always include Feed 1 (the default landing feed)
+        feed_1 = Feed.query.get(1)
+        if feed_1 and feed_1 not in feeds:
+            feeds.append(feed_1)
+        return feeds
+    return cast("list[Feed]", Feed.query.all())
+
+
 @feed_bp.route("/feeds", methods=["GET"])
 def api_feeds() -> ResponseReturnValue:
     settings = current_app.config.get("AUTH_SETTINGS")
@@ -732,21 +754,10 @@ def api_feeds() -> ResponseReturnValue:
         user, error = _require_user_or_error()
         if error:
             return error
-        if user and user.role != "admin":
-            feeds = (
-                Feed.query.join(UserFeed, UserFeed.feed_id == Feed.id)
-                .filter(UserFeed.user_id == user.id)
-                .all()
-            )
-            # Hack: Always include Feed 1
-            feed_1 = Feed.query.get(1)
-            if feed_1 and feed_1 not in feeds:
-                feeds.append(feed_1)
-        else:
-            feeds = Feed.query.all()
+        feeds = _feeds_visible_to_user(user)
         current_user = user
     else:
-        feeds = Feed.query.all()
+        feeds = _feeds_visible_to_user(None)
         current_user = getattr(g, "current_user", None)
 
     feeds_data = [_serialize_feed(feed, current_user=current_user) for feed in feeds]
@@ -983,6 +994,74 @@ def create_aggregate_feed_link() -> ResponseReturnValue:
         ),
         201,
     )
+
+
+@feed_bp.route("/api/user/opml-export", methods=["POST"])
+def export_opml() -> ResponseReturnValue:
+    """Download the user's visible feeds as an OPML 2.0 subscription file.
+
+    POST because generating an authenticated export can mint a missing feed
+    access token; existing active tokens are reused, so it is otherwise
+    idempotent.
+    """
+    user, error = _require_user_or_error(allow_missing_auth=True)
+    if error:
+        return error
+
+    auth_enabled = is_auth_enabled()
+    feeds = _feeds_visible_to_user(user)
+    feeds.sort(key=lambda f: ((f.title or "").casefold(), f.id))
+
+    parsed = urlparse(request.host_url)
+
+    try:
+        tokens_by_feed_id: dict[str, Any] = {}
+        if auth_enabled and user is not None and feeds:
+            result = writer_client.action(
+                "bulk_get_or_create_feed_access_tokens",
+                {"user_id": user.id, "feed_ids": [feed.id for feed in feeds]},
+                wait=True,
+            )
+            if not result or not result.success or not isinstance(result.data, dict):
+                raise RuntimeError("bulk feed token action failed")
+            tokens_by_feed_id = result.data.get("tokens") or {}
+
+        entries: list[tuple[str, str]] = []
+        for feed in feeds:
+            if auth_enabled and user is not None:
+                token = tokens_by_feed_id.get(str(feed.id))
+                if (
+                    not isinstance(token, dict)
+                    or not token.get("token_id")
+                    or not token.get("secret")
+                ):
+                    raise RuntimeError(f"missing token for feed {feed.id}")
+                query = urlencode(
+                    {
+                        "feed_token": str(token["token_id"]),
+                        "feed_secret": str(token["secret"]),
+                    }
+                )
+            else:
+                query = ""
+            xml_url = urlunparse(
+                (parsed.scheme, parsed.netloc, f"/feed/{feed.id}", "", query, "")
+            )
+            entries.append((feed.title or f"Feed {feed.id}", xml_url))
+
+        opml_bytes = generate_opml(entries)
+    except Exception:  # pylint: disable=broad-except
+        # Never log or return token secrets or the generated document.
+        logger.error("OPML export failed for user %s", getattr(user, "id", None))
+        return jsonify({"error": "Failed to generate OPML export."}), 500
+
+    response = make_response(opml_bytes)
+    response.headers["Content-Type"] = "text/x-opml; charset=utf-8"
+    response.headers["Content-Disposition"] = (
+        'attachment; filename="podcast-extended-subscriptions.opml"'
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _require_user_or_error(

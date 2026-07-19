@@ -96,6 +96,33 @@ export default function HomePage() {
   };
 
 
+  const exportOpmlMutation = useMutation({
+    mutationFn: () => feedsApi.exportOpml(),
+    onSuccess: () => {
+      if (requireAuth) {
+        toast.success(
+          'OPML exported. The file contains your private feed credentials — store it securely and delete it after importing.',
+          { duration: 8000 }
+        );
+      } else {
+        toast.success('OPML exported.');
+      }
+    },
+    onError: (err) => {
+      console.error('Failed to export OPML', err);
+      const { status, data, message } = getHttpErrorInfo(err);
+      emitDiagnosticError({
+        title: 'Failed to export OPML',
+        message,
+        kind: status ? 'http' : 'network',
+        details: {
+          status,
+          response: data,
+        },
+      });
+    },
+  });
+
   const handleCopyAggregateLink = async () => {
     try {
       const { url } = await feedsApi.getAggregateFeedLink();
@@ -140,6 +167,34 @@ export default function HomePage() {
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+            </button>
+            <button
+              onClick={() => {
+                if (!exportOpmlMutation.isPending) {
+                  exportOpmlMutation.mutate();
+                }
+              }}
+              disabled={exportOpmlMutation.isPending}
+              aria-label="Export OPML"
+              title={
+                requireAuth
+                  ? 'Export your podcasts as an OPML file for apps like AntennaPod. The file contains private feed credentials — store it securely and delete it after importing.'
+                  : 'Export your podcasts as an OPML file for apps like AntennaPod'
+              }
+              className={`flex items-center justify-center px-3 py-2 rounded-md border transition-colors ${
+                exportOpmlMutation.isPending
+                  ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'border-gray-200 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <svg
+                className={`w-4 h-4 ${exportOpmlMutation.isPending ? 'animate-pulse' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4" />
               </svg>
             </button>
             <button

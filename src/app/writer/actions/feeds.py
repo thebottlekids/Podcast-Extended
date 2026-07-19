@@ -441,6 +441,32 @@ def create_feed_access_token_action(params: Dict[str, Any]) -> Dict[str, Any]:
     return {"token_id": token_id, "secret": secret_value}
 
 
+def bulk_get_or_create_feed_access_tokens_action(
+    params: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Retrieve or create stable feed access tokens for many feeds at once.
+
+    Reuses the one-active-token-per-user-and-feed semantics of
+    create_feed_access_token_action; the whole batch runs inside a single
+    writer command so it commits atomically.
+    """
+    user_id = params.get("user_id")
+    feed_ids = params.get("feed_ids")
+
+    if not user_id:
+        raise ValueError("user_id is required")
+    if not isinstance(feed_ids, list):
+        raise ValueError("feed_ids must be a list")
+
+    tokens: Dict[str, Dict[str, Any]] = {}
+    for feed_id in feed_ids:
+        result = create_feed_access_token_action(
+            {"user_id": int(user_id), "feed_id": int(feed_id)}
+        )
+        tokens[str(int(feed_id))] = result
+    return {"tokens": tokens}
+
+
 def touch_feed_access_token_action(params: Dict[str, Any]) -> Dict[str, Any]:
     token_id = params.get("token_id")
     secret_value = params.get("secret")

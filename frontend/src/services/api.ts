@@ -476,6 +476,32 @@ export const feedsApi = {
     const response = await api.post('/api/user/aggregate-link');
     return response.data;
   },
+
+  // Download all visible feeds as an OPML subscription file
+  exportOpml: async (): Promise<void> => {
+    const response = await api.post('/api/user/opml-export', undefined, {
+      responseType: 'blob',
+    });
+
+    let filename = 'podcast-extended-subscriptions.opml';
+    const disposition = response.headers['content-disposition'];
+    if (typeof disposition === 'string') {
+      const match = disposition.match(/filename="?([^";]+)"?/i);
+      if (match) {
+        filename = match[1];
+      }
+    }
+
+    const blob = new Blob([response.data], { type: 'text/x-opml' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
 };
 
 export const authApi = {
