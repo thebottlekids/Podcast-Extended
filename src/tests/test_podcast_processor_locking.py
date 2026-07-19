@@ -53,7 +53,10 @@ def _make_post(guid: str, tmp_path) -> Post:
     return post
 
 
-def test_second_acquire_for_same_guid_raises_while_locked(app, tmp_path) -> None:
+def test_second_acquire_for_same_guid_raises_while_locked(
+    app, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("PODLY_INSTANCE_DIR", str(tmp_path))
     with app.app_context():
         PodcastProcessor.locks.clear()
         processor = _make_processor()
@@ -76,7 +79,10 @@ def test_second_acquire_for_same_guid_raises_while_locked(app, tmp_path) -> None
             PodcastProcessor.locks.pop(post.guid, None)
 
 
-def test_lock_entry_is_removed_after_release_via_process_cleanup(app, tmp_path) -> None:
+def test_lock_entry_is_removed_after_release_via_process_cleanup(
+    app, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("PODLY_INSTANCE_DIR", str(tmp_path))
     with app.app_context():
         PodcastProcessor.locks.clear()
         processor = _make_processor()
@@ -97,7 +103,10 @@ def test_lock_entry_is_removed_after_release_via_process_cleanup(app, tmp_path) 
         assert post.guid not in PodcastProcessor.locks
 
 
-def test_reacquire_after_cleanup_succeeds_with_fresh_lock(app, tmp_path) -> None:
+def test_reacquire_after_cleanup_succeeds_with_fresh_lock(
+    app, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("PODLY_INSTANCE_DIR", str(tmp_path))
     with app.app_context():
         PodcastProcessor.locks.clear()
         processor = _make_processor()
