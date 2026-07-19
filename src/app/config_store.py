@@ -1209,7 +1209,9 @@ def _check_and_apply_env_changes() -> None:
         logger.warning(f"Failed to check/update environment hash: {e}")
 
 
-def _apply_llm_env_overrides(llm: LLMSettings) -> bool:
+def _apply_llm_env_overrides(
+    llm: LLMSettings,
+) -> bool:  # pylint: disable=too-many-branches
     """Apply environment overrides to LLM settings."""
     changed = False
 

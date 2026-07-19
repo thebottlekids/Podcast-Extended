@@ -321,7 +321,7 @@ class PodcastProcessor:
             existing_lock = PodcastProcessor.locks.get(lock_key)
             if existing_lock is None:
                 new_lock = threading.Lock()
-                new_lock.acquire(blocking=False)
+                new_lock.acquire(blocking=False)  # pylint: disable=consider-using-with
                 PodcastProcessor.locks[lock_key] = new_lock
                 locked = True
             else:
