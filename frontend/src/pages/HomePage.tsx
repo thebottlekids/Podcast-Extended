@@ -58,6 +58,33 @@ export default function HomePage() {
     },
   });
 
+  const exportOpmlMutation = useMutation({
+    mutationFn: () => feedsApi.exportOpml(),
+    onSuccess: () => {
+      if (requireAuth) {
+        toast.success(
+          'OPML exported. The file contains your private feed credentials — store it securely and delete it after importing.',
+          { duration: 8000 }
+        );
+      } else {
+        toast.success('OPML exported.');
+      }
+    },
+    onError: (err) => {
+      console.error('Failed to export OPML', err);
+      const { status, data, message } = getHttpErrorInfo(err);
+      emitDiagnosticError({
+        title: 'Failed to export OPML',
+        message,
+        kind: status ? 'http' : 'network',
+        details: {
+          status,
+          response: data,
+        },
+      });
+    },
+  });
+
   useEffect(() => {
     if (!showAddForm || typeof document === 'undefined') {
       return;
@@ -94,34 +121,6 @@ export default function HomePage() {
   const handleChangePlan = () => {
     navigate('/billing');
   };
-
-
-  const exportOpmlMutation = useMutation({
-    mutationFn: () => feedsApi.exportOpml(),
-    onSuccess: () => {
-      if (requireAuth) {
-        toast.success(
-          'OPML exported. The file contains your private feed credentials — store it securely and delete it after importing.',
-          { duration: 8000 }
-        );
-      } else {
-        toast.success('OPML exported.');
-      }
-    },
-    onError: (err) => {
-      console.error('Failed to export OPML', err);
-      const { status, data, message } = getHttpErrorInfo(err);
-      emitDiagnosticError({
-        title: 'Failed to export OPML',
-        message,
-        kind: status ? 'http' : 'network',
-        details: {
-          status,
-          response: data,
-        },
-      });
-    },
-  });
 
   const handleCopyAggregateLink = async () => {
     try {
