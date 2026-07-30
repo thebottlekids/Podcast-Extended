@@ -383,7 +383,7 @@ def get_feed(f_id: int) -> Response:
     xml_content = generate_feed_xml(feed)
 
     response = make_response(xml_content)
-    response.headers["Content-Type"] = "application/rss+xml"
+    response.headers["Content-Type"] = "application/rss+xml; charset=utf-8"
     return response
 
 
@@ -720,7 +720,7 @@ def get_feed_by_alt_or_url(something_or_rss: str) -> Response:
     if feed:
         xml_content = generate_feed_xml(feed)
         response = make_response(xml_content)
-        response.headers["Content-Type"] = "application/rss+xml"
+        response.headers["Content-Type"] = "application/rss+xml; charset=utf-8"
         return response
 
     return make_response(("Feed not found", 404))
@@ -871,13 +871,13 @@ def get_user_aggregate_feed(user_id: int) -> Response:
             # Support anonymous aggregate feed when auth is disabled
             xml_content = generate_aggregate_feed_xml(None)
             response = make_response(xml_content)
-            response.headers["Content-Type"] = "application/rss+xml"
+            response.headers["Content-Type"] = "application/rss+xml; charset=utf-8"
             return response
         return make_response(("User not found", 404))
 
     xml_content = generate_aggregate_feed_xml(user)
     response = make_response(xml_content)
-    response.headers["Content-Type"] = "application/rss+xml"
+    response.headers["Content-Type"] = "application/rss+xml; charset=utf-8"
     return response
 
 

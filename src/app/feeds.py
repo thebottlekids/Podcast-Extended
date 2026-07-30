@@ -1,8 +1,9 @@
 import datetime
 import logging
+import os
 import uuid
 from email.utils import format_datetime, parsedate_to_datetime
-from typing import Any, Iterable, Optional, cast
+from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import feedparser  # type: ignore[import-untyped]
@@ -106,7 +107,37 @@ def _should_auto_whitelist_new_posts(feed: Feed, post: Optional[Post] = None) ->
     return False
 
 
+def _normalized_public_base_url() -> Optional[str]:
+    """Return the explicitly configured public origin, or None when unusable.
+
+    Request-derived URLs are unreliable behind a reverse proxy: waitress strips
+    X-Forwarded-* headers unless it is given a trusted_proxy, so the scheme can
+    silently fall back to http even when the feed is served over HTTPS. An
+    http:// enclosure inside an HTTPS feed is rejected by some podcast clients,
+    so deployments behind a proxy should set PUBLIC_BASE_URL explicitly.
+    """
+    raw = os.environ.get("PUBLIC_BASE_URL")
+    if not raw or not raw.strip():
+        return None
+
+    candidate = raw.strip().rstrip("/")
+    parsed = urlparse(candidate)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        logger.warning(
+            "PUBLIC_BASE_URL is not an absolute http(s) URL (%r); ignoring it.",
+            raw,
+        )
+        return None
+
+    # Drop query/fragment but keep any path prefix for sub-path deployments.
+    return urlunparse(parsed._replace(query="", fragment="")).rstrip("/")
+
+
 def _get_base_url() -> str:
+    explicit = _normalized_public_base_url()
+    if explicit:
+        return explicit
+
     try:
         # Check various ways HTTP/2 pseudo-headers might be available
         http2_scheme = (
@@ -291,6 +322,72 @@ def add_feed(feed_data: feedparser.FeedParserDict) -> Feed:
         raise e
 
 
+# Namespace for public RSS GUIDs. Keeps Podly's episode identity distinct from
+# the publisher's, so a client cannot merge a Podly item with the official one.
+PODLY_GUID_NAMESPACE = uuid.uuid5(
+    uuid.NAMESPACE_URL, "https://podly.invalid/public-feed-guid"
+)
+
+
+def public_feed_guid(post: Post) -> str:
+    """Return the stable, Podly-specific GUID published in the RSS for a post.
+
+    Derived deterministically from the feed id and the internal ``post.guid``,
+    so it survives reprocessing, metadata refreshes and container restarts.
+    ``Post.guid`` itself is left untouched -- internal routes still use it.
+    """
+    feed_key = getattr(post, "feed_id", None)
+    name = f"{feed_key if feed_key is not None else 'unknown'}:{post.guid}"
+    return f"urn:uuid:{uuid.uuid5(PODLY_GUID_NAMESPACE, name)}"
+
+
+def is_post_publishable(post: Post) -> bool:
+    """Return True when a post may appear in a client-facing RSS feed.
+
+    A published item must be playable immediately: podcast clients expect audio
+    at an enclosure URL, not a 202 "processing queued" response. It must also
+    still satisfy the feed's title rules, which are otherwise only evaluated at
+    ingest time.
+    """
+    if not post.whitelisted:
+        return False
+
+    processed_path = post.processed_audio_path
+    if not processed_path or not os.path.isfile(processed_path):
+        return False
+
+    feed = getattr(post, "feed", None)
+    if feed is not None and not _passes_title_filter(feed, post):
+        return False
+
+    return True
+
+
+class PodlyRSS2(PyRSS2Gen.RSS2):  # type: ignore[misc]
+    """RSS2 channel that advertises its own canonical feed URL.
+
+    Podcast clients use atom:link[rel=self] to identify a feed independently of
+    the URL it was added under.
+    """
+
+    def __init__(self, *, self_link: Optional[str] = None, **kwargs: Any) -> None:
+        self.self_link = self_link
+        super().__init__(**kwargs)
+
+    def publish_extensions(self, handler: Any) -> None:
+        if self.self_link:
+            handler.startElement(
+                "atom:link",
+                {
+                    "href": self.self_link,
+                    "rel": "self",
+                    "type": "application/rss+xml",
+                },
+            )
+            handler.endElement("atom:link")
+        super().publish_extensions(handler)
+
+
 class ItunesRSSItem(PyRSS2Gen.RSSItem):  # type: ignore[misc]
     def __init__(
         self,
@@ -348,7 +445,7 @@ def feed_item(post: Post, prepend_feed_title: bool = False) -> PyRSS2Gen.RSSItem
             length=post.audio_len_bytes(),
         ),
         description=description,
-        guid=post.guid,
+        guid=PyRSS2Gen.Guid(public_feed_guid(post), isPermaLink=False),
         pubDate=_format_pub_date(post.release_date),
         image_url=post.image_url,
     )
@@ -359,20 +456,23 @@ def feed_item(post: Post, prepend_feed_title: bool = False) -> PyRSS2Gen.RSSItem
 def generate_feed_xml(feed: Feed) -> Any:
     logger.info(f"Generating XML for feed with ID: {feed.id}")
 
-    include_unprocessed = getattr(config, "autoprocess_on_download", True)
-
-    if include_unprocessed:
-        posts = list(cast(Iterable[Post], feed.posts))
-    else:
-        posts = (
-            Post.query.filter(
-                Post.feed_id == feed.id,
-                Post.whitelisted.is_(True),
-                Post.processed_audio_path.isnot(None),
-            )
-            .order_by(Post.release_date.desc().nullslast(), Post.id.desc())
-            .all()
+    # Publication eligibility never depends on autoprocess_on_download: an
+    # on-demand-processing deployment must still not advertise episodes whose
+    # audio is not ready, or episodes the feed's title rules exclude.
+    candidates = (
+        Post.query.filter(
+            Post.feed_id == feed.id,
+            Post.whitelisted.is_(True),
+            Post.processed_audio_path.isnot(None),
         )
+        .order_by(Post.release_date.desc().nullslast(), Post.id.desc())
+        .all()
+    )
+    posts = [post for post in candidates if is_post_publishable(post)]
+
+    retention_limit = feed.episode_retention_count
+    if retention_limit and retention_limit > 0:
+        posts = posts[:retention_limit]
 
     items = [feed_item(post) for post in posts]
 
@@ -381,7 +481,8 @@ def generate_feed_xml(feed: Feed) -> Any:
 
     last_build_date = format_datetime(datetime.datetime.now(datetime.timezone.utc))
 
-    rss_feed = PyRSS2Gen.RSS2(
+    rss_feed = PodlyRSS2(
+        self_link=link,
         title="[podly] " + feed.title,
         link=link,
         description=feed.description,
@@ -392,6 +493,7 @@ def generate_feed_xml(feed: Feed) -> Any:
 
     rss_feed.rss_attrs["xmlns:itunes"] = "http://www.itunes.com/dtds/podcast-1.0.dtd"
     rss_feed.rss_attrs["xmlns:content"] = "http://purl.org/rss/1.0/modules/content/"
+    rss_feed.rss_attrs["xmlns:atom"] = "http://www.w3.org/2005/Atom"
 
     logger.info(f"XML generated for feed with ID: {feed.id}")
     return rss_feed.to_xml("utf-8")
@@ -420,7 +522,8 @@ def generate_aggregate_feed_xml(user: Optional[User]) -> Any:
             "Aggregate feed - Last 3 processed episodes from each subscribed feed."
         )
 
-    rss_feed = PyRSS2Gen.RSS2(
+    rss_feed = PodlyRSS2(
+        self_link=link,
         title=feed_title,
         link=link,
         description=feed_description,
@@ -435,6 +538,7 @@ def generate_aggregate_feed_xml(user: Optional[User]) -> Any:
 
     rss_feed.rss_attrs["xmlns:itunes"] = "http://www.itunes.com/dtds/podcast-1.0.dtd"
     rss_feed.rss_attrs["xmlns:content"] = "http://purl.org/rss/1.0/modules/content/"
+    rss_feed.rss_attrs["xmlns:atom"] = "http://www.w3.org/2005/Atom"
 
     logger.info(f"Aggregate XML generated for: {username}")
     return rss_feed.to_xml("utf-8")
@@ -451,17 +555,19 @@ def get_user_aggregate_posts(user_id: int, limit_per_feed: int = 3) -> list[Post
     all_posts = []
     for feed_id in feed_ids:
         # Fetch last N processed posts for this feed
-        posts = (
+        # Filter before truncating, so an excluded or missing-audio episode does
+        # not consume one of the feed's slots.
+        candidates = (
             Post.query.filter(
                 Post.feed_id == feed_id,
                 Post.whitelisted.is_(True),
                 Post.processed_audio_path.isnot(None),
             )
             .order_by(Post.release_date.desc().nullslast(), Post.id.desc())
-            .limit(limit_per_feed)
             .all()
         )
-        all_posts.extend(posts)
+        publishable = [post for post in candidates if is_post_publishable(post)]
+        all_posts.extend(publishable[:limit_per_feed])
 
     # Sort all posts by release date descending
     all_posts.sort(key=lambda p: p.release_date or datetime.datetime.min, reverse=True)

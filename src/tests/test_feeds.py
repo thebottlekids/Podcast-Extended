@@ -19,6 +19,7 @@ from app.feeds import (
     get_duration,
     get_guid,
     make_post,
+    public_feed_guid,
     refresh_feed,
 )
 from app.models import Feed, Post
@@ -428,7 +429,11 @@ def test_feed_item(mock_post, app):
     # Verify the result
     assert isinstance(result, PyRSS2Gen.RSSItem)
     assert result.title == mock_post.title
-    assert result.guid == mock_post.guid
+    # The published GUID is Podly-specific, never the publisher's, so clients
+    # cannot merge this item with the official episode.
+    assert result.guid.guid == public_feed_guid(mock_post)
+    assert result.guid.guid != mock_post.guid
+    assert result.guid.isPermaLink is False
 
     # Check enclosure
     assert result.enclosure.url == "http://podly.com:5001/api/posts/test-guid/download"
@@ -461,7 +466,11 @@ def test_feed_item_with_reverse_proxy(mock_post, app):
     # Verify the result
     assert isinstance(result, PyRSS2Gen.RSSItem)
     assert result.title == mock_post.title
-    assert result.guid == mock_post.guid
+    # The published GUID is Podly-specific, never the publisher's, so clients
+    # cannot merge this item with the official episode.
+    assert result.guid.guid == public_feed_guid(mock_post)
+    assert result.guid.guid != mock_post.guid
+    assert result.guid.isPermaLink is False
 
     # Check enclosure - should use HTTP/2 pseudo-headers
     assert result.enclosure.url == "http://podly.com:5001/api/posts/test-guid/download"
@@ -494,7 +503,11 @@ def test_feed_item_with_reverse_proxy_custom_port(mock_post, app):
     # Verify the result
     assert isinstance(result, PyRSS2Gen.RSSItem)
     assert result.title == mock_post.title
-    assert result.guid == mock_post.guid
+    # The published GUID is Podly-specific, never the publisher's, so clients
+    # cannot merge this item with the official episode.
+    assert result.guid.guid == public_feed_guid(mock_post)
+    assert result.guid.guid != mock_post.guid
+    assert result.guid.isPermaLink is False
 
     # Check enclosure - should use HTTPS with custom port
     assert result.enclosure.url == "https://podly.com:8443/api/posts/test-guid/download"
@@ -568,27 +581,33 @@ def test_get_base_url_localhost():
     assert result == "http://localhost:5001"
 
 
+@pytest.mark.parametrize("autoprocess_enabled", [False, True])
 @mock.patch("app.feeds.feed_item")
 @mock.patch("app.feeds.PyRSS2Gen.Image")
-@mock.patch("app.feeds.PyRSS2Gen.RSS2")
+@mock.patch("app.feeds.PodlyRSS2")
 def test_generate_feed_xml_filters_processed_whitelisted(
-    mock_rss_2, mock_image, mock_feed_item, app
+    mock_rss_2, mock_image, mock_feed_item, app, tmp_path, autoprocess_enabled
 ):
-    # Use real models to verify query filtering logic
+    # Use real models to verify query filtering logic. Eligibility must not
+    # depend on autoprocess_on_download -- an unprocessed enclosure returns a
+    # 202 JSON body, which is not playable audio for a podcast client.
     with app.app_context():
         original_flag = getattr(runtime_config, "autoprocess_on_download", False)
-        runtime_config.autoprocess_on_download = False
+        runtime_config.autoprocess_on_download = autoprocess_enabled
         try:
             feed = Feed(rss_url="http://example.com/feed", title="Feed 1")
             db.session.add(feed)
             db.session.commit()
+
+            good_audio = tmp_path / "good.mp3"
+            good_audio.write_bytes(b"audio")
 
             processed = Post(
                 feed_id=feed.id,
                 title="Processed",
                 guid="good",
                 download_url="http://example.com/good.mp3",
-                processed_audio_path="/tmp/good.mp3",
+                processed_audio_path=str(good_audio),
                 whitelisted=True,
             )
             unprocessed = Post(
@@ -631,12 +650,12 @@ def test_generate_feed_xml_filters_processed_whitelisted(
             runtime_config.autoprocess_on_download = original_flag
 
 
-@mock.patch("app.feeds.feed_item")
-@mock.patch("app.feeds.PyRSS2Gen.Image")
-@mock.patch("app.feeds.PyRSS2Gen.RSS2")
-def test_generate_feed_xml_includes_all_when_autoprocess_enabled(
-    mock_rss_2, mock_image, mock_feed_item, app
-):
+def test_generate_feed_xml_omits_unprocessed_when_autoprocess_enabled(app, tmp_path):
+    """Regression: autoprocess_on_download used to publish every post verbatim.
+
+    That advertised episodes whose enclosure answers with a 202 JSON body and
+    bypassed the whitelist and the feed's title rules entirely.
+    """
     with app.app_context():
         original_flag = getattr(runtime_config, "autoprocess_on_download", False)
         runtime_config.autoprocess_on_download = True
@@ -645,12 +664,15 @@ def test_generate_feed_xml_includes_all_when_autoprocess_enabled(
             db.session.add(feed)
             db.session.commit()
 
+            good_audio = tmp_path / "good.mp3"
+            good_audio.write_bytes(b"audio")
+
             processed = Post(
                 feed_id=feed.id,
                 title="Processed",
                 guid="good",
                 download_url="http://example.com/good.mp3",
-                processed_audio_path="/tmp/good.mp3",
+                processed_audio_path=str(good_audio),
                 whitelisted=True,
                 release_date=datetime.datetime(
                     2024, 1, 3, tzinfo=datetime.timezone.utc
@@ -672,7 +694,7 @@ def test_generate_feed_xml_includes_all_when_autoprocess_enabled(
                 title="Not Whitelisted",
                 guid="bad2",
                 download_url="http://example.com/bad2.mp3",
-                processed_audio_path="/tmp/bad2.mp3",
+                processed_audio_path=str(good_audio),
                 whitelisted=False,
                 release_date=datetime.datetime(
                     2024, 1, 1, tzinfo=datetime.timezone.utc
@@ -682,22 +704,15 @@ def test_generate_feed_xml_includes_all_when_autoprocess_enabled(
             db.session.add_all([processed, unprocessed, not_whitelisted])
             db.session.commit()
 
-            mock_feed_item.side_effect = (
-                lambda post, prepend_feed_title=False: mock.MagicMock(
-                    post_guid=post.guid
-                )
-            )
-            mock_rss = mock_rss_2.return_value
-            mock_rss.to_xml.return_value = "<rss></rss>"
+            xml = generate_feed_xml(feed)
 
-            result = generate_feed_xml(feed)
+            assert "Processed" in xml
+            assert "Unprocessed" not in xml
+            assert "Not Whitelisted" not in xml
+            assert xml.count("<item>") == 1
 
-            called_posts = [call.args[0] for call in mock_feed_item.call_args_list]
-            assert called_posts == [processed, unprocessed, not_whitelisted]
-
-            mock_rss_2.assert_called_once()
-            mock_rss.to_xml.assert_called_once_with("utf-8")
-            assert result == "<rss></rss>"
+            # The publisher's audio URL must never appear in a Podly feed.
+            assert "http://example.com/good.mp3" not in xml
         finally:
             runtime_config.autoprocess_on_download = original_flag
 
