@@ -355,10 +355,28 @@ class AudioProcessor:
         )
 
         post.processed_audio_path = output_path
+
+        # Record the length of the cut file. post.duration above is the original
+        # length, so it overstates the episode by however much was removed and
+        # must not be published as itunes:duration.
+        processed_duration_ms = get_audio_duration_ms(output_path)
+        if processed_duration_ms is None:
+            self.logger.warning(
+                "Could not determine processed duration for %s; leaving it unset",
+                output_path,
+            )
+            post.processed_duration = None
+        else:
+            post.processed_duration = int(processed_duration_ms / 1000)
+
         result = writer_client.update(
             "Post",
             post.id,
-            {"processed_audio_path": output_path, "duration": post.duration},
+            {
+                "processed_audio_path": output_path,
+                "duration": post.duration,
+                "processed_duration": post.processed_duration,
+            },
             wait=True,
         )
         if not result or not result.success:

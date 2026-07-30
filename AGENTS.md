@@ -1,8 +1,10 @@
-Project: Podcast-AdBlock (a fork of Podly)
-Repository: https://github.com/mebezac/Podcast-AdBlock
+Project: Podcast-Extended (a fork of Podly)
+Repository: https://github.com/thebottlekids/Podcast-Extended
 
-**This is a fork of normand1/podly_pure_podcasts**
+**This is a fork of podly-pure-podcasts/podly_pure_podcasts**
 All development work should target this fork, not the upstream repository.
+The published image is `ghcr.io/thebottlekids/podcast-adblock` (`:lite` is the
+variant deployed on Unraid). Pushing to `main` builds and publishes it.
 
 Project-specific rules:
 - Do not create Alembic migrations yourself; request the user to generate migrations after model changes.

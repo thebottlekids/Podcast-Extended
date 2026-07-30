@@ -330,6 +330,21 @@ PODLY_GUID_NAMESPACE = uuid.uuid5(
 )
 
 
+def _format_itunes_duration(seconds: Optional[int]) -> Optional[str]:
+    """Format a duration as HH:MM:SS for itunes:duration, or None if unusable."""
+    if seconds is None:
+        return None
+    try:
+        total = int(seconds)
+    except (TypeError, ValueError):
+        return None
+    if total <= 0:
+        return None
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
 def public_feed_guid(post: Post) -> str:
     """Return the stable, Podly-specific GUID published in the RSS for a post.
 
@@ -474,9 +489,11 @@ class ItunesRSSItem(PyRSS2Gen.RSSItem):  # type: ignore[misc]
         guid: str,
         pubDate: Optional[str],
         image_url: Optional[str] = None,
+        duration_seconds: Optional[int] = None,
         **kwargs: Any,
     ) -> None:
         self.image_url = image_url
+        self.duration_seconds = duration_seconds
         super().__init__(
             title=title,
             enclosure=enclosure,
@@ -486,15 +503,15 @@ class ItunesRSSItem(PyRSS2Gen.RSSItem):  # type: ignore[misc]
             **kwargs,
         )
 
-    # NOTE: deliberately no itunes:duration. Post.duration is the publisher's
-    # pre-ad-removal length, so publishing it would overstate every processed
-    # episode. Clients derive the true length from the audio file instead.
-    # Emitting it correctly requires persisting the processed duration at
-    # processing time.
     def publish_extensions(self, handler: Any) -> None:
         if self.image_url:
             handler.startElement("itunes:image", {"href": self.image_url})
             handler.endElement("itunes:image")
+        formatted = _format_itunes_duration(self.duration_seconds)
+        if formatted:
+            handler.startElement("itunes:duration", {})
+            handler.characters(formatted)
+            handler.endElement("itunes:duration")
         super().publish_extensions(handler)
 
 
@@ -529,6 +546,10 @@ def feed_item(post: Post, prepend_feed_title: bool = False) -> PyRSS2Gen.RSSItem
         guid=PyRSS2Gen.Guid(public_feed_guid(post), isPermaLink=False),
         pubDate=_format_pub_date(post.release_date),
         image_url=post.image_url,
+        # Only the processed length is correct here; post.duration is the
+        # publisher's pre-cut length. Omitted when unknown (e.g. episodes
+        # processed before this was recorded) so clients fall back to the file.
+        duration_seconds=getattr(post, "processed_duration", None),
     )
 
     return item

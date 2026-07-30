@@ -86,6 +86,10 @@ class Post(db.Model):  # type: ignore[name-defined, misc]
     description = db.Column(db.Text)
     release_date = db.Column(db.DateTime(timezone=True))
     duration = db.Column(db.Integer)
+    # Length of the *processed* audio in seconds. `duration` above is the
+    # publisher's original length, which overstates the episode once ads are
+    # cut, so only this value is safe to publish as itunes:duration.
+    processed_duration = db.Column(db.Integer, nullable=True)
     whitelisted = db.Column(db.Boolean, default=False, nullable=False)
     image_url = db.Column(db.Text)  # Episode thumbnail URL
     download_count = db.Column(db.Integer, nullable=True, default=0)
