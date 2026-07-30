@@ -17,6 +17,31 @@ def main() -> None:
         threads = 1
 
     port = os.environ.get("PORT", 5001)
+
+    # waitress discards X-Forwarded-* from untrusted peers, so without this the
+    # ProxyFix middleware never sees them and the login rate-limiter keys every
+    # request on the reverse proxy's address instead of the real client's.
+    # Set TRUSTED_PROXY_IP to the proxy's source address as seen by this
+    # container (the diagnostics endpoint reports it as remote_addr).
+    #
+    # "*" trusts any peer -- only safe when nothing but the proxy can reach this
+    # port, since any client that can connect could then spoof its own client IP.
+    trusted_proxy = (os.environ.get("TRUSTED_PROXY_IP") or "").strip()
+    if trusted_proxy:
+        serve(
+            app,
+            host="0.0.0.0",
+            port=port,
+            threads=threads,
+            trusted_proxy=trusted_proxy,
+            trusted_proxy_headers={
+                "x-forwarded-for",
+                "x-forwarded-proto",
+                "x-forwarded-host",
+            },
+        )
+        return
+
     serve(
         app,
         host="0.0.0.0",

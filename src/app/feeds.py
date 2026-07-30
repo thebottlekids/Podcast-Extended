@@ -1,4 +1,5 @@
 import datetime
+import ipaddress
 import logging
 import os
 import uuid
@@ -363,6 +364,81 @@ def is_post_publishable(post: Post) -> bool:
     return True
 
 
+def posts_failing_title_filter(feed: Feed) -> list[Post]:
+    """Return whitelisted posts of a feed that the current title rules reject.
+
+    These were whitelisted before the rule existed. They are already excluded
+    from generated feeds by is_post_publishable(); this identifies them so an
+    operator can unwhitelist them and reclaim the processed audio.
+    """
+    whitelisted = Post.query.filter(
+        Post.feed_id == feed.id, Post.whitelisted.is_(True)
+    ).all()
+    return [post for post in whitelisted if not _passes_title_filter(feed, post)]
+
+
+def feed_diagnostics(feed: Feed) -> dict[str, Any]:
+    """Summarize why a feed publishes what it publishes, without leaking secrets."""
+    base_url = _get_base_url()
+    parsed_base = urlparse(base_url)
+
+    posts = Post.query.filter(Post.feed_id == feed.id).all()
+    whitelisted = [p for p in posts if p.whitelisted]
+    with_audio_path = [p for p in whitelisted if p.processed_audio_path]
+    missing_file = [
+        p for p in with_audio_path if not os.path.isfile(p.processed_audio_path or "")
+    ]
+    filtered_out = posts_failing_title_filter(feed)
+    publishable = [p for p in posts if is_post_publishable(p)]
+
+    published_guids = [public_feed_guid(p) for p in publishable]
+    upstream_guids = {p.guid for p in publishable}
+
+    return {
+        "feed_id": feed.id,
+        "feed_title": feed.title,
+        "public_origin": {
+            "effective_base_url": base_url,
+            "scheme": parsed_base.scheme,
+            "explicitly_configured": _normalized_public_base_url() is not None,
+            "is_loopback_or_private": _is_private_host(parsed_base.hostname),
+        },
+        "counts": {
+            "total": len(posts),
+            "whitelisted": len(whitelisted),
+            "whitelisted_without_audio": len(whitelisted) - len(with_audio_path),
+            "processed_file_missing": len(missing_file),
+            "excluded_by_title_filter": len(filtered_out),
+            "publishable": len(publishable),
+        },
+        "title_filters": {
+            "include": feed.title_filter_include,
+            "exclude": feed.title_filter_exclude,
+        },
+        "episode_retention_count": feed.episode_retention_count,
+        "identity": {
+            "duplicate_published_guids": len(published_guids)
+            - len(set(published_guids)),
+            "published_guid_matches_upstream": sum(
+                1 for guid in published_guids if guid in upstream_guids
+            ),
+        },
+    }
+
+
+def _is_private_host(hostname: Optional[str]) -> bool:
+    """True when a host is loopback/private and therefore unreachable publicly."""
+    if not hostname:
+        return True
+    if hostname in ("localhost", "127.0.0.1", "::1"):
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_private
+    except ValueError:
+        # A hostname rather than a literal address; assume publicly routable.
+        return False
+
+
 class PodlyRSS2(PyRSS2Gen.RSS2):  # type: ignore[misc]
     """RSS2 channel that advertises its own canonical feed URL.
 
@@ -410,6 +486,11 @@ class ItunesRSSItem(PyRSS2Gen.RSSItem):  # type: ignore[misc]
             **kwargs,
         )
 
+    # NOTE: deliberately no itunes:duration. Post.duration is the publisher's
+    # pre-ad-removal length, so publishing it would overstate every processed
+    # episode. Clients derive the true length from the audio file instead.
+    # Emitting it correctly requires persisting the processed duration at
+    # processing time.
     def publish_extensions(self, handler: Any) -> None:
         if self.image_url:
             handler.startElement("itunes:image", {"href": self.image_url})

@@ -32,10 +32,12 @@ from app.auth.service import update_user_last_active
 from app.extensions import db
 from app.feeds import (
     add_or_refresh_feed,
+    feed_diagnostics,
     generate_aggregate_feed_xml,
     generate_feed_xml,
     is_default_landing_feed,
     is_feed_active_for_user,
+    posts_failing_title_filter,
     refresh_feed,
 )
 from app.jobs_manager import get_jobs_manager
@@ -544,6 +546,110 @@ def update_feed_settings_endpoint(  # pylint: disable=too-many-branches
         return jsonify({"error": "Feed not found"}), 404
 
     return jsonify(_serialize_feed(feed, current_user=getattr(g, "current_user", None)))
+
+
+@feed_bp.route("/api/feeds/<int:feed_id>/diagnostics", methods=["GET"])
+def feed_diagnostics_endpoint(feed_id: int) -> ResponseReturnValue:
+    """Report why a feed publishes what it publishes.
+
+    Answers the questions that matter when a podcast client rejects a feed or
+    shows the wrong episodes: is the public origin routable, how many episodes
+    are filtered vs unprocessed vs missing their audio, and is episode identity
+    distinct from the publisher's.
+    """
+    _, error_response = require_admin("view feed diagnostics")
+    if error_response is not None:
+        return error_response
+
+    feed = db.session.get(Feed, feed_id)
+    if feed is None:
+        return jsonify({"error": "Feed not found"}), 404
+
+    diagnostics = feed_diagnostics(feed)
+    # Surface what the proxy actually forwards -- waitress drops X-Forwarded-*
+    # unless it is started with a trusted_proxy, which is easy to misconfigure.
+    diagnostics["request_context"] = {
+        "remote_addr": request.remote_addr,
+        "scheme_seen_by_app": request.scheme,
+        "forwarded_proto": request.headers.get("X-Forwarded-Proto"),
+        "forwarded_host": request.headers.get("X-Forwarded-Host"),
+        "forwarded_for": request.headers.get("X-Forwarded-For"),
+    }
+    return jsonify(diagnostics)
+
+
+@feed_bp.route("/api/feeds/<int:feed_id>/reapply-title-filters", methods=["POST"])
+def reapply_title_filters_endpoint(feed_id: int) -> ResponseReturnValue:
+    """Unwhitelist already-ingested posts the feed's title rules now reject.
+
+    Title rules are applied when a post is ingested and when a feed is
+    rendered, but posts whitelisted before a rule existed keep their whitelist
+    flag and their processed audio. This re-applies the current rules to them.
+
+    Pass {"dry_run": true} to preview without writing.
+    """
+    _, error_response = require_admin("reapply title filters")
+    if error_response is not None:
+        return error_response
+
+    feed = db.session.get(Feed, feed_id)
+    if feed is None:
+        return jsonify({"error": "Feed not found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    dry_run = bool(payload.get("dry_run", False))
+
+    stale = posts_failing_title_filter(feed)
+    titles = [post.title for post in stale[:20]]
+
+    if not stale:
+        return jsonify(
+            {
+                "feed_id": feed.id,
+                "matched": 0,
+                "updated": 0,
+                "dry_run": dry_run,
+                "sample_titles": [],
+            }
+        )
+
+    if dry_run:
+        return jsonify(
+            {
+                "feed_id": feed.id,
+                "matched": len(stale),
+                "updated": 0,
+                "dry_run": True,
+                "sample_titles": titles,
+            }
+        )
+
+    result = writer_client.action(
+        "set_posts_whitelist",
+        {"post_ids": [post.id for post in stale], "whitelisted": False},
+        wait=True,
+    )
+    if result is None or not result.success:
+        return (
+            jsonify(
+                {"error": getattr(result, "error", "Failed to update posts")},
+            ),
+            500,
+        )
+
+    updated = (result.data or {}).get("updated", 0)
+    logger.info(
+        "Reapplied title filters to feed %s: unwhitelisted %s posts", feed.id, updated
+    )
+    return jsonify(
+        {
+            "feed_id": feed.id,
+            "matched": len(stale),
+            "updated": updated,
+            "dry_run": False,
+            "sample_titles": titles,
+        }
+    )
 
 
 @feed_bp.route("/api/feeds/bulk-settings", methods=["PATCH"])
