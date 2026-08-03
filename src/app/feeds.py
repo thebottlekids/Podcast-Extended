@@ -455,14 +455,23 @@ def _is_private_host(hostname: Optional[str]) -> bool:
 
 
 class PodlyRSS2(PyRSS2Gen.RSS2):  # type: ignore[misc]
-    """RSS2 channel that advertises its own canonical feed URL.
+    """RSS2 channel that advertises its own canonical feed URL and artwork.
 
     Podcast clients use atom:link[rel=self] to identify a feed independently of
-    the URL it was added under.
+    the URL it was added under, and read channel artwork from itunes:image --
+    PyRSS2Gen only emits the RSS 2.0 <image> element, which podcast apps ignore,
+    leaving the show art blank.
     """
 
-    def __init__(self, *, self_link: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        self_link: Optional[str] = None,
+        image_href: Optional[str] = None,
+        **kwargs: Any,
+    ) -> None:
         self.self_link = self_link
+        self.image_href = image_href
         super().__init__(**kwargs)
 
     def publish_extensions(self, handler: Any) -> None:
@@ -476,6 +485,9 @@ class PodlyRSS2(PyRSS2Gen.RSS2):  # type: ignore[misc]
                 },
             )
             handler.endElement("atom:link")
+        if self.image_href:
+            handler.startElement("itunes:image", {"href": self.image_href})
+            handler.endElement("itunes:image")
         super().publish_extensions(handler)
 
 
@@ -585,6 +597,7 @@ def generate_feed_xml(feed: Feed) -> Any:
 
     rss_feed = PodlyRSS2(
         self_link=link,
+        image_href=feed.image_url,
         title="[podly] " + feed.title,
         link=link,
         description=feed.description,
@@ -624,15 +637,17 @@ def generate_aggregate_feed_xml(user: Optional[User]) -> Any:
             "Aggregate feed - Last 3 processed episodes from each subscribed feed."
         )
 
+    aggregate_image = f"{base_url}/static/images/logos/manifest-icon-512.maskable.png"
     rss_feed = PodlyRSS2(
         self_link=link,
+        image_href=aggregate_image,
         title=feed_title,
         link=link,
         description=feed_description,
         lastBuildDate=last_build_date,
         items=items,
         image=PyRSS2Gen.Image(
-            url=f"{base_url}/static/images/logos/manifest-icon-512.maskable.png",
+            url=aggregate_image,
             title=feed_title,
             link=link,
         ),
