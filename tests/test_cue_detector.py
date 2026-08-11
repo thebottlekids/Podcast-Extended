@@ -45,6 +45,33 @@ class TestCueDetector(unittest.TestCase):
         text = "Just a normal sentence."
         self.assertEqual(self.detector.highlight_cues(text), text)
 
+    def test_bare_url_is_not_a_strong_ad_cue(self) -> None:
+        self.assertFalse(
+            self.detector.has_strong_ad_cue(
+                "Shopify.com exists at a scale most programmers never touch."
+            )
+        )
+
+    def test_url_with_cta_is_a_strong_ad_cue(self) -> None:
+        self.assertTrue(
+            self.detector.has_strong_ad_cue(
+                "Visit example.com and use code SAVE20 at checkout."
+            )
+        )
+
+    def test_sponsor_intro_is_a_strong_ad_cue(self) -> None:
+        text = "This episode is brought to you by Progressive."
+        signals = self.detector.analyze(text)
+        self.assertTrue(signals["sponsor_intro"])
+        self.assertTrue(self.detector.has_strong_ad_cue(text))
+
+    def test_self_promotion_is_not_a_strong_ad_cue(self) -> None:
+        self.assertFalse(
+            self.detector.has_strong_ad_cue(
+                "Join our community and check out our newsletter."
+            )
+        )
+
     def test_integration_prompt(self) -> None:
         segments = [
             Segment(start=10.0, end=15.0, text="Welcome back to the show."),

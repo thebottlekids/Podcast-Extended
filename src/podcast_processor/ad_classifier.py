@@ -230,7 +230,7 @@ class AdClassifier:
                         ad_identifications=ad_identifications,
                         model_call=model_call,
                         post_id=post.id,
-                        window=5,
+                        window=3,
                     )
                     self.logger.info(
                         f"Created {created} neighbor identifications via bulk ops"
@@ -927,7 +927,7 @@ class AdClassifier:
         base_confidence: float,
         to_insert: List[Dict[str, Any]],
     ) -> int:
-        """If an ad is detected within the first 45s, include up to 3 preceding intro segments."""
+        """Include only explicit sponsor/transition context before a pre-roll ad."""
         if matched_segment.start_time > 45.0:
             return 0
 
@@ -938,6 +938,16 @@ class AdClassifier:
             if seg.id in processed_segment_ids:
                 continue
             if self._segment_has_ad_identification(seg.id):
+                continue
+
+            signals = self.cue_detector.analyze(seg.text or "")
+            if signals["self_promo"] and not signals["sponsor_intro"]:
+                continue
+            if not (
+                signals["sponsor_intro"]
+                or signals["transition"]
+                or self.cue_detector.has_strong_ad_cue(seg.text or "")
+            ):
                 continue
 
             processed_segment_ids.add(seg.id)
@@ -1282,7 +1292,7 @@ class AdClassifier:
         ad_identifications: List[Identification],
         model_call: ModelCall,
         post_id: int,
-        window: int = 5,
+        window: int = 3,
     ) -> int:
         """Expand neighbors using bulk operations (3 queries instead of 900)"""
 
@@ -1323,12 +1333,8 @@ class AdClassifier:
 
                 text = seg.text or ""
                 signals = self.cue_detector.analyze(text)
-                has_strong_cue = (
-                    signals["url"]
-                    or signals["promo"]
-                    or signals["phone"]
-                    or signals["cta"]
-                )
+                has_strong_cue = self.cue_detector.has_strong_ad_cue(text)
+                is_sponsor_intro = signals["sponsor_intro"]
                 is_transition = signals["transition"]
                 is_self_promo = signals["self_promo"]
 
@@ -1339,13 +1345,16 @@ class AdClassifier:
 
                 if not self._should_expand_neighbor(
                     has_strong_cue=has_strong_cue,
+                    is_sponsor_intro=is_sponsor_intro,
                     is_transition=is_transition,
+                    is_self_promo=is_self_promo,
                     gap_seconds=gap_seconds,
                 ):
                     continue
 
                 confidence = self._neighbor_confidence(
                     has_strong_cue=has_strong_cue,
+                    is_sponsor_intro=is_sponsor_intro,
                     is_transition=is_transition,
                     is_self_promo=is_self_promo,
                     gap_seconds=gap_seconds,
@@ -1371,26 +1380,28 @@ class AdClassifier:
         self,
         *,
         has_strong_cue: bool,
+        is_sponsor_intro: bool,
         is_transition: bool,
+        is_self_promo: bool,
         gap_seconds: float,
     ) -> bool:
-        if not self.config.enable_boundary_refinement:
-            return has_strong_cue
-
-        if has_strong_cue or is_transition:
-            return True
-
-        return gap_seconds <= 10.0
+        del gap_seconds  # Kept in the signature for callers and diagnostics.
+        if is_self_promo and not is_sponsor_intro:
+            return False
+        return has_strong_cue or is_sponsor_intro or is_transition
 
     @staticmethod
     def _neighbor_confidence(
         *,
         has_strong_cue: bool,
+        is_sponsor_intro: bool,
         is_transition: bool,
         is_self_promo: bool,
         gap_seconds: float,
     ) -> float:
         confidence = 0.72 if is_transition else 0.75
+        if is_sponsor_intro:
+            confidence = 0.84
         if has_strong_cue:
             confidence = 0.85 if gap_seconds <= 10.0 else 0.8
         if is_self_promo:

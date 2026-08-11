@@ -412,3 +412,29 @@ def test_build_chunk_payload_trims_for_token_limit(
     assert len(chunk_segments) >= consumed
     assert mock_validator.call_count == 2
     assert user_prompt
+
+
+def test_neighbor_expansion_requires_an_explicit_ad_signal(
+    test_classifier: AdClassifier,
+) -> None:
+    assert not test_classifier._should_expand_neighbor(
+        has_strong_cue=False,
+        is_sponsor_intro=False,
+        is_transition=False,
+        is_self_promo=False,
+        gap_seconds=4.0,
+    )
+    assert test_classifier._should_expand_neighbor(
+        has_strong_cue=True,
+        is_sponsor_intro=False,
+        is_transition=False,
+        is_self_promo=False,
+        gap_seconds=4.0,
+    )
+    assert not test_classifier._should_expand_neighbor(
+        has_strong_cue=True,
+        is_sponsor_intro=False,
+        is_transition=False,
+        is_self_promo=True,
+        gap_seconds=4.0,
+    )

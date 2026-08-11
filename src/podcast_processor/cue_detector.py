@@ -14,7 +14,12 @@ class CueDetector:
             r"\b(?:\+?1[ -]?)?\d{3}[ -]?\d{3}[ -]?\d{4}\b"
         )
         self.cta_pattern: Pattern[str] = re.compile(
-            r"\b(visit|go to|check out|head over|sign up|start today|start now|use code|offer|deal|free trial)\b",
+            r"\b(visit|go to|check out|head over|sign up|start today|start now|use code|shop now|order now|claim|try it at)\b",
+            re.I,
+        )
+        self.sponsor_intro_pattern: Pattern[str] = re.compile(
+            r"\b(brought to you by|sponsored by|presented by|paid for by|"
+            r"thanks to our sponsor|our sponsor|support from|partnered with)\b",
             re.I,
         )
         self.transition_pattern: Pattern[str] = re.compile(
@@ -34,12 +39,30 @@ class CueDetector:
             or self.cta_pattern.search(text)
         )
 
+    def has_strong_ad_cue(self, text: str) -> bool:
+        """Return cues that are strong enough to expand an existing ad label.
+
+        A bare URL or generic promotional word is common in normal podcast
+        discussion. Require sponsor framing, a promo/discount code, a phone
+        number, or a CTA paired with a URL before propagating an ad label.
+        """
+        signals = self.analyze(text)
+        if signals["self_promo"] and not signals["sponsor_intro"]:
+            return False
+        return bool(
+            signals["sponsor_intro"]
+            or signals["promo"]
+            or signals["phone"]
+            or (signals["url"] and signals["cta"])
+        )
+
     def analyze(self, text: str) -> Dict[str, bool]:
         return {
             "url": bool(self.url_pattern.search(text)),
             "promo": bool(self.promo_pattern.search(text)),
             "phone": bool(self.phone_pattern.search(text)),
             "cta": bool(self.cta_pattern.search(text)),
+            "sponsor_intro": bool(self.sponsor_intro_pattern.search(text)),
             "transition": bool(self.transition_pattern.search(text)),
             "self_promo": bool(self.self_promo_pattern.search(text)),
         }
@@ -55,6 +78,7 @@ class CueDetector:
             self.promo_pattern,
             self.phone_pattern,
             self.cta_pattern,
+            self.sponsor_intro_pattern,
             self.transition_pattern,
             self.self_promo_pattern,
         ]
