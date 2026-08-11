@@ -415,23 +415,23 @@ def test_build_chunk_payload_trims_for_token_limit(
 
 
 def test_neighbor_expansion_requires_an_explicit_ad_signal(
-    test_classifier: AdClassifier,
+    test_classifier_with_mocks: AdClassifier,
 ) -> None:
-    assert not test_classifier._should_expand_neighbor(
+    assert not test_classifier_with_mocks._should_expand_neighbor(
         has_strong_cue=False,
         is_sponsor_intro=False,
         is_transition=False,
         is_self_promo=False,
         gap_seconds=4.0,
     )
-    assert test_classifier._should_expand_neighbor(
+    assert test_classifier_with_mocks._should_expand_neighbor(
         has_strong_cue=True,
         is_sponsor_intro=False,
         is_transition=False,
         is_self_promo=False,
         gap_seconds=4.0,
     )
-    assert not test_classifier._should_expand_neighbor(
+    assert not test_classifier_with_mocks._should_expand_neighbor(
         has_strong_cue=True,
         is_sponsor_intro=False,
         is_transition=False,
