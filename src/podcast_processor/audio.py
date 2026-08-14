@@ -127,15 +127,13 @@ def _clip_segments_complex(
         )
 
         if fade_ms > 0:
-            if index > 0 and index < len(keep_segments) - 1:
+            if 0 < index < len(keep_segments) - 1:
                 edge_fade_ms = min(fade_ms, duration_ms // 2)
             else:
                 edge_fade_ms = min(fade_ms, duration_ms)
 
             if index > 0 and edge_fade_ms > 0:
-                stream = stream.filter(
-                    "afade", t="in", st=0, d=edge_fade_ms / 1000.0
-                )
+                stream = stream.filter("afade", t="in", st=0, d=edge_fade_ms / 1000.0)
             if index < len(keep_segments) - 1 and edge_fade_ms > 0:
                 stream = stream.filter(
                     "afade",
