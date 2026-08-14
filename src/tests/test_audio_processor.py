@@ -145,6 +145,20 @@ def test_merge_ad_segments_end_extension(
     assert merged[0] == (28000, 30000)  # Extended to end
 
 
+def test_merge_ad_segments_clamps_boundaries_to_audio_duration(
+    test_processor_with_mocks: AudioProcessor,
+) -> None:
+    """Refined boundaries beyond the file must not be persisted or cut."""
+    merged = test_processor_with_mocks.merge_ad_segments(
+        duration_ms=30_000,
+        ad_segments=[(10.0, 35.0)],
+        min_ad_segment_length_seconds=2.0,
+        min_ad_segment_separation_seconds=2.0,
+    )
+
+    assert merged == [(10_000, 30_000)]
+
+
 def test_process_audio(
     app: Flask,
     test_config: Config,

@@ -226,6 +226,26 @@ class AudioProcessor:
         """
         audio_duration_seconds = duration_ms / 1000.0
 
+        # Boundary refinement can occasionally return an end time beyond the
+        # actual downloaded file. Normalize before merge/last-segment logic so
+        # the persisted cut list and the FFmpeg input describe the same file.
+        normalized_segments: List[Tuple[float, float]] = []
+        for raw_start, raw_end in ad_segments:
+            start = max(0.0, min(float(raw_start), audio_duration_seconds))
+            end = max(0.0, min(float(raw_end), audio_duration_seconds))
+            if end <= start:
+                self.logger.warning(
+                    "Skipping invalid ad interval after clamping: (%s, %s) -> (%s, %s)",
+                    raw_start,
+                    raw_end,
+                    start,
+                    end,
+                )
+                continue
+            normalized_segments.append((start, end))
+
+        ad_segments = normalized_segments
+
         self.logger.info(
             f"Creating new audio with ads segments removed between: {ad_segments}"
         )

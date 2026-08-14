@@ -2,6 +2,8 @@ import tempfile
 from pathlib import Path
 
 from podcast_processor.audio import (
+    _keep_segments,
+    _normalize_ad_segments,
     clip_segments_with_fade,
     get_audio_duration_ms,
     split_audio,
@@ -28,10 +30,7 @@ def test_clip_segment_with_fade() -> None:
         )
 
         expected_duration = (
-            TEST_FILE_DURATION
-            - (ad_end_offset_ms - ad_start_offset_ms)
-            + 2 * fade_len_ms
-            + 56  # not sure where this fudge comes from
+            TEST_FILE_DURATION - (ad_end_offset_ms - ad_start_offset_ms) + 56
         )
         actual_duration = get_audio_duration_ms(temp_file.name)
         assert actual_duration is not None, "Failed to get audio duration"
@@ -54,10 +53,7 @@ def test_clip_segment_with_fade_beginning() -> None:
         )
 
         expected_duration = (
-            TEST_FILE_DURATION
-            - (ad_end_offset_ms - ad_start_offset_ms)
-            + 2 * fade_len_ms
-            + 56  # not sure where this fudge comes from
+            TEST_FILE_DURATION - (ad_end_offset_ms - ad_start_offset_ms) + 56
         )
         actual_duration = get_audio_duration_ms(temp_file.name)
         assert actual_duration is not None, "Failed to get audio duration"
@@ -83,10 +79,7 @@ def test_clip_segment_with_fade_end() -> None:
         )
 
         expected_duration = (
-            TEST_FILE_DURATION
-            - (ad_end_offset_ms - ad_start_offset_ms)
-            + 2 * fade_len_ms
-            + 56  # not sure where this fudge comes from
+            TEST_FILE_DURATION - (ad_end_offset_ms - ad_start_offset_ms) + 56
         )
         actual_duration = get_audio_duration_ms(temp_file.name)
         assert actual_duration is not None, "Failed to get audio duration"
@@ -129,3 +122,17 @@ def test_split_audio() -> None:
             assert (
                 abs(filesize - split.stat().st_size) <= 500
             ), f"filesize <> 500 bytes for {split}. found {split.stat().st_size}, expected {filesize}"  # pylint: disable=line-too-long
+
+
+def test_normalize_ad_segments_clamps_and_discards_invalid_intervals() -> None:
+    assert _normalize_ad_segments(
+        [(100, 200), (190, 250), (900, 1_100), (1_100, 1_000)], 1_000
+    ) == [(100, 250), (900, 1_000)]
+
+
+def test_keep_segments_never_include_ad_audio() -> None:
+    assert _keep_segments([(100, 200), (400, 500)], 1_000) == [
+        (0, 100),
+        (200, 400),
+        (500, 1_000),
+    ]

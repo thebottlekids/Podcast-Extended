@@ -58,6 +58,54 @@ def clip_segments_with_fade(
         _clip_segments_simple(ad_segments_ms, in_path, out_path, audio_duration_ms)
 
 
+def _normalize_ad_segments(
+    ad_segments_ms: List[Tuple[int, int]], audio_duration_ms: int
+) -> List[Tuple[int, int]]:
+    """Clamp, discard, and merge invalid ad intervals before cutting audio."""
+    if audio_duration_ms <= 0:
+        return []
+
+    normalized: List[Tuple[int, int]] = []
+    for raw_start, raw_end in sorted(ad_segments_ms):
+        start_ms = max(0, min(int(raw_start), audio_duration_ms))
+        end_ms = max(0, min(int(raw_end), audio_duration_ms))
+        if end_ms <= start_ms:
+            logger.warning(
+                "Skipping invalid ad interval after clamping: (%s, %s) -> (%s, %s)",
+                raw_start,
+                raw_end,
+                start_ms,
+                end_ms,
+            )
+            continue
+
+        if normalized and start_ms <= normalized[-1][1]:
+            normalized[-1] = (normalized[-1][0], max(normalized[-1][1], end_ms))
+        else:
+            normalized.append((start_ms, end_ms))
+
+    return normalized
+
+
+def _keep_segments(
+    ad_segments_ms: List[Tuple[int, int]], audio_duration_ms: int
+) -> List[Tuple[int, int]]:
+    """Return the source intervals that should remain after ad removal."""
+    normalized = _normalize_ad_segments(ad_segments_ms, audio_duration_ms)
+    keep: List[Tuple[int, int]] = []
+    last_end = 0
+
+    for start_ms, end_ms in normalized:
+        if start_ms > last_end:
+            keep.append((last_end, start_ms))
+        last_end = max(last_end, end_ms)
+
+    if last_end < audio_duration_ms:
+        keep.append((last_end, audio_duration_ms))
+
+    return keep
+
+
 def _clip_segments_complex(
     ad_segments_ms: List[Tuple[int, int]],
     fade_ms: int,
@@ -65,36 +113,41 @@ def _clip_segments_complex(
     out_path: str,
     audio_duration_ms: int,
 ) -> None:
-    """Original complex approach with fades."""
+    """Remove ads completely and fade the retained content at each cut edge."""
 
+    keep_segments = _keep_segments(ad_segments_ms, audio_duration_ms)
     trimmed_list = []
 
-    last_end = 0
-    for start_ms, end_ms in ad_segments_ms:
-        trimmed_list.extend(
-            [
-                ffmpeg.input(in_path).filter(
-                    "atrim", start=last_end / 1000.0, end=start_ms / 1000.0
-                ),
-                ffmpeg.input(in_path)
-                .filter(
-                    "atrim", start=start_ms / 1000.0, end=(start_ms + fade_ms) / 1000.0
+    for index, (start_ms, end_ms) in enumerate(keep_segments):
+        duration_ms = end_ms - start_ms
+        stream = (
+            ffmpeg.input(in_path)
+            .filter("atrim", start=start_ms / 1000.0, end=end_ms / 1000.0)
+            .filter("asetpts", "PTS-STARTPTS")
+        )
+
+        if fade_ms > 0:
+            if index > 0 and index < len(keep_segments) - 1:
+                edge_fade_ms = min(fade_ms, duration_ms // 2)
+            else:
+                edge_fade_ms = min(fade_ms, duration_ms)
+
+            if index > 0 and edge_fade_ms > 0:
+                stream = stream.filter(
+                    "afade", t="in", st=0, d=edge_fade_ms / 1000.0
                 )
-                .filter("afade", t="out", ss=0, d=fade_ms / 1000.0),
-                ffmpeg.input(in_path)
-                .filter("atrim", start=(end_ms - fade_ms) / 1000.0, end=end_ms / 1000.0)
-                .filter("afade", t="in", ss=0, d=fade_ms / 1000.0),
-            ]
-        )
+            if index < len(keep_segments) - 1 and edge_fade_ms > 0:
+                stream = stream.filter(
+                    "afade",
+                    t="out",
+                    st=(duration_ms - edge_fade_ms) / 1000.0,
+                    d=edge_fade_ms / 1000.0,
+                )
 
-        last_end = end_ms
+        trimmed_list.append(stream)
 
-    if last_end != audio_duration_ms:
-        trimmed_list.append(
-            ffmpeg.input(in_path).filter(
-                "atrim", start=last_end / 1000.0, end=audio_duration_ms / 1000.0
-            )
-        )
+    if not trimmed_list:
+        raise ValueError("No audio segments remain after ad removal")
 
     logger.info(
         "[FFMPEG_CONCAT] Starting audio concatenation: %s -> %s (%d segments)",
@@ -114,17 +167,7 @@ def _clip_segments_simple(
 ) -> None:
     """Simpler approach without fades - more reliable for many segments."""
 
-    # Build list of segments to keep (inverse of ad segments)
-    keep_segments: List[Tuple[int, int]] = []
-    last_end = 0
-
-    for start_ms, end_ms in ad_segments_ms:
-        if start_ms > last_end:
-            keep_segments.append((last_end, start_ms))
-        last_end = end_ms
-
-    if last_end < audio_duration_ms:
-        keep_segments.append((last_end, audio_duration_ms))
+    keep_segments = _keep_segments(ad_segments_ms, audio_duration_ms)
 
     if not keep_segments:
         raise ValueError("No audio segments to keep after ad removal")
