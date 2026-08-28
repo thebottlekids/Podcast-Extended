@@ -1433,9 +1433,21 @@ class AdClassifier:
         # Group into ad blocks
         ad_blocks = self._group_into_blocks(identifications)
 
+        # Blocks shorter than the configured cut threshold are never removed
+        # from the audio (see audio_processor.py), so refining their
+        # boundaries would be wasted work -- but the threshold must match
+        # that cutoff, or blocks that *are* cut end up skipping refinement
+        # and keeping their coarse, unrefined segment-level boundaries.
+        min_refine_length_seconds = float(
+            self.config.output.min_ad_segment_length_seconds
+        )
+
         for block in ad_blocks:
             # Skip low confidence or very short blocks
-            if block["confidence"] < 0.6 or (block["end"] - block["start"]) < 15.0:
+            if (
+                block["confidence"] < 0.6
+                or (block["end"] - block["start"]) < min_refine_length_seconds
+            ):
                 continue
 
             # Refine

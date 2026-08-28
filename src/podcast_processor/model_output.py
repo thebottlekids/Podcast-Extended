@@ -1,5 +1,5 @@
+import json
 import logging
-import re
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel
@@ -25,12 +25,57 @@ class AdSegmentPredictionList(BaseModel):
     confidence: Optional[float] = None
 
 
+def _close_missing_brackets(text: str) -> str:
+    """Append whatever closing brackets/braces the counts say are missing.
+
+    Closes innermost-first: the ad_segments array, then the outer object.
+    """
+    open_braces = text.count("{")
+    close_braces = text.count("}")
+    open_brackets = text.count("[")
+    close_brackets = text.count("]")
+
+    missing_brackets = open_brackets - close_brackets
+    missing_braces = open_braces - close_braces
+
+    if missing_brackets > 0:
+        text += "]" * missing_brackets
+    if missing_braces > 0:
+        text += "}" * missing_braces
+
+    return text
+
+
+def _is_valid_json(text: str) -> bool:
+    try:
+        json.loads(text)
+        return True
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
 def _attempt_json_repair(json_str: str) -> str:
     """
-    Attempt to repair truncated JSON by adding missing closing brackets.
+    Attempt to repair truncated JSON by adding missing closing brackets, and
+    only if that alone doesn't yield valid JSON, dropping an incomplete
+    trailing element first.
 
-    This handles cases where the LLM response was cut off mid-JSON,
-    e.g., '{"ad_segments":[{"segment_offset":10.5,"confidence":0.92}'
+    This handles cases where the LLM response was cut off mid-JSON. Two
+    shapes show up in practice:
+
+    1. Every field present is already complete and only the closing
+       brackets/braces themselves were cut off, e.g.
+       '{"ad_segments":[{"segment_offset":10.5,"confidence":0.92}'
+       Here we must NOT discard anything -- trailing fields like
+       content_type/confidence may be complete and worth keeping.
+
+    2. The trailing element itself is incomplete -- cut off mid-key,
+       mid-string, or (common for this schema, since both segment fields are
+       bare numbers) mid-number with no closing quote to anchor a trim on,
+       e.g. '..."confidence":0.92},{"segment_offset":15.0,"conf'. Naively
+       closing brackets here still leaves invalid JSON, so we drop back to
+       the last element the model finished emitting and close out from
+       there.
     """
     # Count opening and closing brackets/braces
     open_braces = json_str.count("{")
@@ -47,46 +92,29 @@ def _attempt_json_repair(json_str: str) -> str:
         f"{open_brackets} '[' vs {close_brackets} ']'. Attempting repair."
     )
 
-    # Remove any trailing incomplete key-value pair
-    # e.g., '..."confidence":0.9' or '..."key":"val' or '..."key":'
-    # First, try to find the last complete value
-    repaired = json_str.rstrip()
+    repaired = json_str.rstrip().rstrip(",")
 
-    # If ends with a comma, remove it (incomplete next element)
-    repaired = repaired.rstrip(",")
+    # Strategy 1: assume only the closing brackets/braces were cut off.
+    closed = _close_missing_brackets(repaired)
+    if _is_valid_json(closed):
+        logger.info("Repaired JSON by closing missing brackets/braces")
+        return closed
 
-    # If ends with a colon or incomplete string, try to truncate to last complete element
-    # Pattern: ends with "key": or "key":"incomplete or similar
-    incomplete_patterns = [
-        r',"[^"]*":\s*$',  # ,"key":
-        r',"[^"]*":\s*"[^"]*$',  # ,"key":"incomplete
-    ]
+    # Strategy 2: the trailing element is genuinely incomplete. Truncate to
+    # the last fully-closed object and discard whatever partial element
+    # trails it.
+    last_complete_object_end = repaired.rfind("}")
+    if last_complete_object_end != -1:
+        dropped = repaired[last_complete_object_end + 1 :]
+        repaired = repaired[: last_complete_object_end + 1]
+        if dropped.strip():
+            logger.debug(f"Dropped incomplete trailing element: {dropped[:200]!r}")
 
-    for pattern in incomplete_patterns:
-        match = re.search(pattern, repaired)
-        if match:
-            repaired = repaired[: match.start()]
-            logger.debug(f"Removed incomplete trailing content: {match.group()}")
-            break
-
-    # Recount after cleanup
-    open_braces = repaired.count("{")
-    close_braces = repaired.count("}")
-    open_brackets = repaired.count("[")
-    close_brackets = repaired.count("]")
-
-    # Add missing closing brackets/braces in the right order
-    # We need to determine the order based on the structure
-    # Typically for our schema it's: ]} to close ad_segments array and outer object
-    missing_brackets = close_brackets - open_brackets  # negative means we need more ]
-    missing_braces = close_braces - open_braces  # negative means we need more }
-
-    if missing_brackets < 0:
-        repaired += "]" * abs(missing_brackets)
-    if missing_braces < 0:
-        repaired += "}" * abs(missing_braces)
-
-    logger.info("Repaired JSON by adding missing closing brackets/braces")
+    repaired = _close_missing_brackets(repaired)
+    logger.info(
+        "Repaired JSON by truncating to the last complete element and "
+        "closing remaining brackets/braces"
+    )
 
     return repaired
 
