@@ -1,6 +1,7 @@
 from unittest import mock
 
 import pytest
+import requests
 
 from app.models import Feed, Post
 from podcast_processor.podcast_downloader import (
@@ -174,6 +175,55 @@ def test_download_episode_download_failed(mock_get, test_post, downloader, app):
 
         # Check that None was returned
         assert result is None
+
+
+@mock.patch("podcast_processor.podcast_downloader.time.sleep")
+@mock.patch("podcast_processor.podcast_downloader.requests.get")
+def test_download_episode_retries_transient_network_error(
+    mock_get, mock_sleep, test_post, downloader, app
+):
+    with app.app_context():
+        # A DNS blip / dropped connection should be retried, not left to
+        # strand the post forever (nothing else re-queues a failed job).
+        mock_response = mock.MagicMock()
+        mock_response.status_code = 200
+        mock_response.iter_content.return_value = [b"podcast audio content"]
+        mock_response.__enter__.return_value = mock_response
+        mock_response.__exit__.return_value = None
+
+        mock_get.side_effect = [
+            requests.exceptions.ConnectionError("Temporary failure in name resolution"),
+            requests.exceptions.ConnectionError("Temporary failure in name resolution"),
+            mock_response,
+        ]
+
+        expected_path = downloader.get_and_make_download_path(test_post.title)
+        result = downloader.download_episode(test_post, dest_path=str(expected_path))
+
+        assert mock_get.call_count == 3
+        assert mock_sleep.call_count == 2
+        assert result == str(expected_path)
+        assert expected_path.read_bytes() == b"podcast audio content"
+
+
+@mock.patch("podcast_processor.podcast_downloader.time.sleep")
+@mock.patch("podcast_processor.podcast_downloader.requests.get")
+def test_download_episode_raises_after_exhausting_retries(
+    mock_get, mock_sleep, test_post, downloader, app
+):
+    with app.app_context():
+        mock_get.side_effect = requests.exceptions.ConnectionError(
+            "Temporary failure in name resolution"
+        )
+
+        expected_path = downloader.get_and_make_download_path(test_post.title)
+
+        with pytest.raises(DownloadError):
+            downloader.download_episode(test_post, dest_path=str(expected_path))
+
+        assert mock_get.call_count == 4  # DOWNLOAD_MAX_ATTEMPTS
+        assert mock_sleep.call_count == 3
+        assert not expected_path.exists()
 
 
 @mock.patch("podcast_processor.podcast_downloader.validators.url")

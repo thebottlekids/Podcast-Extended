@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Iterator, Optional, Set
 
@@ -16,6 +17,18 @@ from shared.processing_paths import get_in_root
 logger = logging.getLogger(__name__)
 
 DOWNLOAD_DIR = str(get_in_root())
+
+# A single dropped connection or DNS blip otherwise strands a post forever:
+# nothing re-queues a job once it has failed once (see JobsManager), so the
+# episode silently never reaches the feed. Retry transient network errors
+# here rather than relying on an outer layer to notice and resubmit.
+DOWNLOAD_MAX_ATTEMPTS = 4
+DOWNLOAD_RETRY_BACKOFF_SECONDS = 5
+RETRYABLE_DOWNLOAD_EXCEPTIONS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
 
 
 class DownloadError(Exception):
@@ -76,21 +89,44 @@ class PodcastDownloader:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Referer": referer,
         }
-        with requests.get(
-            audio_link, stream=True, timeout=60, headers=headers
-        ) as response:
-            if response.status_code == 200:
-                with open(download_path, "wb") as file:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        file.write(chunk)
-                self.logger.info("Download complete.")
-            else:
-                self.logger.info(
-                    f"Failed to download the podcast episode, response: {response.status_code}"
-                )
-                return None
 
-        return download_path
+        last_error: Optional[Exception] = None
+        for attempt in range(1, DOWNLOAD_MAX_ATTEMPTS + 1):
+            try:
+                with requests.get(
+                    audio_link, stream=True, timeout=60, headers=headers
+                ) as response:
+                    if response.status_code == 200:
+                        with open(download_path, "wb") as file:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                file.write(chunk)
+                        self.logger.info("Download complete.")
+                        return download_path
+
+                    self.logger.info(
+                        f"Failed to download the podcast episode, response: {response.status_code}"
+                    )
+                    return None
+            except RETRYABLE_DOWNLOAD_EXCEPTIONS as exc:
+                last_error = exc
+                if attempt >= DOWNLOAD_MAX_ATTEMPTS:
+                    break
+                wait_seconds = DOWNLOAD_RETRY_BACKOFF_SECONDS * attempt
+                self.logger.warning(
+                    "Transient network error downloading %s (attempt %d/%d): %s. "
+                    "Retrying in %ds.",
+                    audio_link,
+                    attempt,
+                    DOWNLOAD_MAX_ATTEMPTS,
+                    exc,
+                    wait_seconds,
+                )
+                time.sleep(wait_seconds)
+
+        raise DownloadError(
+            f"Failed to download episode for post {post.id} after "
+            f"{DOWNLOAD_MAX_ATTEMPTS} attempts: {last_error}"
+        ) from last_error
 
     def get_and_make_download_path(self, post_title: str) -> Path:
         """
