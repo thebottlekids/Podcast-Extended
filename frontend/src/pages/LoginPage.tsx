@@ -16,6 +16,15 @@ export default function LoginPage() {
   const [authentikEnabled, setAuthentikEnabled] = useState(false);
   const [authentikLoading, setAuthentikLoading] = useState(false);
   const [showPasswordLogin, setShowPasswordLogin] = useState(false);
+  const [autoRedirecting, setAutoRedirecting] = useState(false);
+  const [ssoStatusLoaded, setSsoStatusLoaded] = useState(false);
+
+  // Read once at mount: the manual-chooser escape hatch, same convention as
+  // this household's other auto-redirecting apps (e.g. cloud.mknudsen.net's
+  // Nextcloud login uses the same ?direct=1 pattern).
+  const [directMode] = useState(
+    () => new URLSearchParams(window.location.search).get('direct') === '1'
+  );
 
   const ssoEnabled = discordEnabled || authentikEnabled;
 
@@ -39,19 +48,6 @@ export default function LoginPage() {
       // Clean URL
       window.history.replaceState({}, '', window.location.pathname);
     }
-  }, []);
-
-  // Check which SSO providers are enabled
-  useEffect(() => {
-    Promise.allSettled([discordApi.getStatus(), authentikApi.getStatus()]).then(
-      ([discordResult, authentikResult]) => {
-        const discordOn = discordResult.status === 'fulfilled' && discordResult.value.enabled;
-        const authentikOn = authentikResult.status === 'fulfilled' && authentikResult.value.enabled;
-        setDiscordEnabled(discordOn);
-        setAuthentikEnabled(authentikOn);
-        setShowPasswordLogin(!discordOn && !authentikOn);
-      }
-    );
   }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -98,8 +94,36 @@ export default function LoginPage() {
     } catch {
       setError('Failed to start Authentik login. Please try again.');
       setAuthentikLoading(false);
+      setAutoRedirecting(false);
+      setSsoStatusLoaded(true);
     }
   };
+
+  // Check which SSO providers are enabled, and auto-redirect straight to
+  // Authentik unless the manual chooser was explicitly requested (?direct=1)
+  // or the page just loaded after a failed attempt (an error param present
+  // -- redirecting again immediately would loop).
+  useEffect(() => {
+    const hadError = new URLSearchParams(window.location.search).has('error');
+
+    Promise.allSettled([discordApi.getStatus(), authentikApi.getStatus()]).then(
+      ([discordResult, authentikResult]) => {
+        const discordOn = discordResult.status === 'fulfilled' && discordResult.value.enabled;
+        const authentikOn = authentikResult.status === 'fulfilled' && authentikResult.value.enabled;
+        setDiscordEnabled(discordOn);
+        setAuthentikEnabled(authentikOn);
+        setShowPasswordLogin(!discordOn && !authentikOn);
+
+        if (authentikOn && !directMode && !hadError) {
+          setAutoRedirecting(true);
+          void handleAuthentikLogin();
+        } else {
+          setSsoStatusLoaded(true);
+        }
+      }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -117,7 +141,20 @@ export default function LoginPage() {
           </div>
         )}
 
-        {ssoEnabled && (
+        {autoRedirecting && (
+          <div className="flex flex-col items-center gap-4 py-6">
+            <span className="animate-spin h-6 w-6 border-2 border-slate-800 border-t-transparent rounded-full" />
+            <p className="text-sm text-gray-600">Redirecting to Authentik…</p>
+            <a
+              href={`${window.location.pathname}?direct=1`}
+              className="text-sm font-medium text-blue-700 hover:text-blue-800 hover:underline"
+            >
+              Use username / password instead
+            </a>
+          </div>
+        )}
+
+        {!autoRedirecting && ssoStatusLoaded && ssoEnabled && (
           <div className="space-y-3 mb-4">
             {authentikEnabled && (
               <button
@@ -166,7 +203,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {(!ssoEnabled || showPasswordLogin) && (
+        {!autoRedirecting && ssoStatusLoaded && (!ssoEnabled || showPasswordLogin) && (
           <form
             className={`space-y-4 ${ssoEnabled ? 'pt-4 border-t border-gray-200' : ''}`}
             onSubmit={handleSubmit}
