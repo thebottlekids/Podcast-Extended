@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,6 +18,10 @@ export default function LoginPage() {
   const [showPasswordLogin, setShowPasswordLogin] = useState(false);
   const [autoRedirecting, setAutoRedirecting] = useState(false);
   const [ssoStatusLoaded, setSsoStatusLoaded] = useState(false);
+  // The auto-redirect fetch and the "use password instead" click can race:
+  // without this, clicking the escape hatch while the fetch is still
+  // in-flight doesn't actually stop the redirect once it resolves.
+  const bailedFromAutoRedirect = useRef(false);
 
   // Read once at mount: the manual-chooser escape hatch, same convention as
   // this household's other auto-redirecting apps (e.g. cloud.mknudsen.net's
@@ -90,6 +94,10 @@ export default function LoginPage() {
     setAuthentikLoading(true);
     try {
       const { authorization_url } = await authentikApi.getLoginUrl();
+      if (bailedFromAutoRedirect.current) {
+        setAuthentikLoading(false);
+        return;
+      }
       window.location.href = authorization_url;
     } catch {
       setError('Failed to start Authentik login. Please try again.');
@@ -145,12 +153,18 @@ export default function LoginPage() {
           <div className="flex flex-col items-center gap-4 py-6">
             <span className="animate-spin h-6 w-6 border-2 border-slate-800 border-t-transparent rounded-full" />
             <p className="text-sm text-gray-600">Redirecting to Authentik…</p>
-            <a
-              href={`${window.location.pathname}?direct=1`}
+            <button
+              type="button"
+              onClick={() => {
+                bailedFromAutoRedirect.current = true;
+                setAutoRedirecting(false);
+                setSsoStatusLoaded(true);
+                setShowPasswordLogin(true);
+              }}
               className="text-sm font-medium text-blue-700 hover:text-blue-800 hover:underline"
             >
               Use username / password instead
-            </a>
+            </button>
           </div>
         )}
 
