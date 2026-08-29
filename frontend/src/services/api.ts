@@ -605,6 +605,18 @@ export const discordApi = {
   },
 };
 
+export const authentikApi = {
+  getStatus: async (): Promise<{ enabled: boolean }> => {
+    const response = await api.get('/api/auth/authentik/status');
+    return response.data;
+  },
+
+  getLoginUrl: async (): Promise<{ authorization_url: string }> => {
+    const response = await api.get('/api/auth/authentik/login');
+    return response.data;
+  },
+};
+
 export const configApi = {
   getConfig: async (): Promise<ConfigResponse> => {
     const response = await api.get('/api/config');

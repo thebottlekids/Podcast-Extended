@@ -1,6 +1,7 @@
 from flask import Flask
 
 from .auth_routes import auth_bp
+from .authentik_routes import authentik_bp
 from .billing_routes import billing_bp
 from .config_routes import config_bp
 from .discord_routes import discord_bp
@@ -20,3 +21,4 @@ def register_routes(app: Flask) -> None:
     app.register_blueprint(auth_bp)
     app.register_blueprint(billing_bp)
     app.register_blueprint(discord_bp)
+    app.register_blueprint(authentik_bp)

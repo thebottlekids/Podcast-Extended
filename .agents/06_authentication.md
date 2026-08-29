@@ -17,6 +17,7 @@ Podly has a flexible authentication system that can be enabled or disabled based
 - User role system (admin/user)
 - Feed access tokens for podcast players
 - Discord SSO support
+- Authentik SSO support (single-admin mapping, see below)
 - Stripe billing integration
 
 ## Components
@@ -107,6 +108,41 @@ Optional Discord OAuth integration:
 3. Discord redirects back with code
 4. Podly exchanges code for user info
 5. Creates/links user account
+6. Redirects to app
+
+## Authentik SSO
+
+Optional Authentik OIDC integration, structurally different from Discord SSO:
+Discord self-registers a new limited `user`-role account per Discord identity
+(`upsert_discord_user_action`); Authentik login always maps to the single
+existing local **admin** account instead (`app/auth/authentik_service.py:get_admin_user`).
+This is a single-admin-household design, not multi-tenant -- access control
+lives in Authentik itself (the OIDC Application's policy binding decides who
+can complete the login at all), not in per-identity Podly accounts.
+
+It is a **public OAuth2 client** (PKCE, no `client_secret` stored anywhere)
+against Authentik's standard OIDC endpoints, discovered live from
+`{issuer}/.well-known/openid-configuration` at boot -- not the Authentik
+*proxy outpost* pattern used for other apps behind this household's
+Authentik, which would also gate the token-authenticated feed/audio routes
+(`/feed/*`, `/api/posts/*/download`, etc.) that podcast clients hit and
+cannot complete an interactive SSO redirect for.
+
+**Configuration (env vars only -- no DB-backed settings/admin UI, unlike Discord):**
+- `AUTHENTIK_ISSUER` -- e.g. `https://auth.example.com/application/o/<slug>/`
+- `AUTHENTIK_CLIENT_ID`
+- `AUTHENTIK_REDIRECT_URI` -- `https://<host>/api/auth/authentik/callback`
+
+Enabled only when the discovery fetch succeeds at boot; fails closed (SSO
+disabled, not a startup crash) if the issuer is unreachable.
+
+**Flow:**
+1. User clicks "Continue with Authentik"
+2. `GET /api/auth/authentik/login` generates PKCE verifier/challenge + state,
+   returns the Authentik authorization URL
+3. Authentik redirects back to `/api/auth/authentik/callback` with a code
+4. Podly exchanges the code for a token (PKCE verifier, no secret)
+5. Session is created for the existing admin user (no new account)
 6. Redirects to app
 
 ## Authentication Flows
@@ -208,6 +244,11 @@ DISCORD_CLIENT_ID=...
 DISCORD_CLIENT_SECRET=...
 DISCORD_REDIRECT_URI=https://example.com/api/discord/callback
 DISCORD_GUILD_IDS=123456,789012
+
+# Authentik (optional; public client, no secret)
+AUTHENTIK_ISSUER=https://auth.example.com/application/o/<slug>/
+AUTHENTIK_CLIENT_ID=...
+AUTHENTIK_REDIRECT_URI=https://example.com/api/auth/authentik/callback
 ```
 
 **Web UI Configuration:**

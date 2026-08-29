@@ -16,6 +16,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from app import models
 from app.auth import AuthSettings, load_auth_settings
+from app.auth.authentik_settings import load_authentik_settings
 from app.auth.bootstrap import bootstrap_admin_user
 from app.auth.discord_settings import load_discord_settings
 from app.auth.middleware import init_auth_middleware
@@ -177,12 +178,21 @@ def _create_configured_app(
         discord_settings = load_discord_settings()
         app.config["DISCORD_SETTINGS"] = discord_settings
 
+        authentik_settings = load_authentik_settings()
+        app.config["AUTHENTIK_SETTINGS"] = authentik_settings
+
     app.config["AUTH_SETTINGS"] = auth_settings.without_password()
 
     if app.config["DISCORD_SETTINGS"].enabled:
         logger.info(
             "Discord SSO enabled (guild restriction: %s)",
             "yes" if app.config["DISCORD_SETTINGS"].guild_ids else "no",
+        )
+
+    if app.config["AUTHENTIK_SETTINGS"].enabled:
+        logger.info(
+            "Authentik SSO enabled (issuer: %s)",
+            app.config["AUTHENTIK_SETTINGS"].issuer,
         )
 
     _validate_env_key_conflicts()
