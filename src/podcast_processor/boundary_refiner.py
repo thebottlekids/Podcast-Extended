@@ -18,6 +18,7 @@ from jinja2 import Template
 
 from app.writer.client import writer_client
 from shared.config import Config
+from shared.llm_headers import llm_extra_headers
 
 # Internal defaults for boundary expansion; not user-configurable.
 MAX_START_EXTENSION_SECONDS = 30.0
@@ -128,6 +129,7 @@ Return JSON: {"refined_start": {{ad_start}}, "refined_end": {{ad_end}}, "start_r
                 timeout=self.config.openai_timeout,
                 api_key=self.config.llm_api_key,
                 base_url=self.config.openai_base_url,
+                headers=llm_extra_headers(self.config.openai_base_url),
             )
 
             choice = response.choices[0] if response.choices else None

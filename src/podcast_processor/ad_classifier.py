@@ -41,6 +41,7 @@ from podcast_processor.token_rate_limiter import (
 from podcast_processor.transcribe import Segment
 from podcast_processor.word_boundary_refiner import WordBoundaryRefiner
 from shared.config import Config, TestWhisperConfig
+from shared.llm_headers import llm_extra_headers
 from shared.llm_utils import model_uses_max_completion_tokens
 
 
@@ -683,6 +684,10 @@ class AdClassifier:
         else:
             # For older models and non-OpenAI models, use max_tokens
             completion_args["max_tokens"] = self.config.openai_max_tokens
+
+        # Provider-specific headers (e.g. OpenCode Go's session id). Empty for
+        # every non-OpenCode lane, so litellm sees no extra headers there.
+        completion_args["headers"] = llm_extra_headers(self.config.openai_base_url)
 
         return completion_args
 
