@@ -3,7 +3,7 @@ import os
 import shutil
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import AbstractSet, Any, Callable, Dict, List, Optional
 
 import litellm
 from jinja2 import Template
@@ -11,6 +11,7 @@ from sqlalchemy.orm import object_session
 
 from app.extensions import db
 from app.models import Post, ProcessingJob, TranscriptSegment
+from app.posts import other_post_processed_paths
 from app.writer.client import writer_client
 from podcast_processor.ad_classifier import AdClassifier
 from podcast_processor.audio_processor import AudioProcessor
@@ -24,6 +25,7 @@ from podcast_processor.transcription_manager import TranscriptionManager
 from shared.config import Config
 from shared.processing_paths import (
     ProcessingPaths,
+    disambiguate_processed_path,
     get_job_unprocessed_path,
     get_srv_root,
     paths_from_unprocessed_path,
@@ -32,10 +34,16 @@ from shared.processing_paths import (
 logger = logging.getLogger("global_logger")
 
 
-def get_post_processed_audio_path(post: Post) -> Optional[ProcessingPaths]:
+def get_post_processed_audio_path(
+    post: Post, *, taken_paths: AbstractSet[str] = frozenset()
+) -> Optional[ProcessingPaths]:
     """
     Generate the processed audio path based on the post's unprocessed audio path.
     Returns None if unprocessed_audio_path is not set.
+
+    ``taken_paths`` carries the processed paths already claimed by other posts
+    in the feed; when the derived filename is one of them it is suffixed with
+    this post's ``_<guid8>`` (title-collision protection).
     """
     unprocessed_path = post.unprocessed_audio_path
     if not unprocessed_path or not isinstance(unprocessed_path, str):
@@ -47,15 +55,28 @@ def get_post_processed_audio_path(post: Post) -> Optional[ProcessingPaths]:
         logger.warning(f"Post {post.id} has no feed title.")
         return None
 
-    return paths_from_unprocessed_path(unprocessed_path, title)
+    return paths_from_unprocessed_path(
+        unprocessed_path,
+        title,
+        post_guid=getattr(post, "guid", None),
+        taken_paths=taken_paths,
+    )
 
 
 def get_post_processed_audio_path_cached(
-    post: Post, feed_title: str
+    post: Post,
+    feed_title: str,
+    *,
+    post_guid: Optional[str] = None,
+    taken_paths: AbstractSet[str] = frozenset(),
 ) -> Optional[ProcessingPaths]:
     """
     Generate the processed audio path using cached feed title to avoid ORM access.
     Returns None if unprocessed_audio_path is not set.
+
+    ``post_guid``/``taken_paths`` feed the same collision disambiguation as
+    ``get_post_processed_audio_path``; the guid falls back to ``post.guid``
+    (a plain column, never a lazy relationship).
     """
     unprocessed_path = post.unprocessed_audio_path
     if not unprocessed_path or not isinstance(unprocessed_path, str):
@@ -66,7 +87,12 @@ def get_post_processed_audio_path_cached(
         logger.warning(f"Post {post.id} has no feed title.")
         return None
 
-    return paths_from_unprocessed_path(unprocessed_path, feed_title)
+    return paths_from_unprocessed_path(
+        unprocessed_path,
+        feed_title,
+        post_guid=post_guid or getattr(post, "guid", None),
+        taken_paths=taken_paths,
+    )
 
 
 class PodcastProcessor:
@@ -201,6 +227,9 @@ class PodcastProcessor:
             )
 
             try:
+                # The path was minted by _acquire_processing_lock, which
+                # disambiguates title collisions by ownership, so a hit here
+                # is this post's own file (never a same-title sibling's).
                 if os.path.exists(processed_audio_path):
                     self.logger.info(f"Audio already processed: {post}")
                     # Update the database with the processed audio path
@@ -302,8 +331,14 @@ class PodcastProcessor:
         Raises:
             ProcessorException: If lock cannot be acquired or paths are invalid
         """
-        # Get processing paths
-        working_paths = get_post_processed_audio_path_cached(post, feed_title)
+        # Get processing paths. The taken_paths set (paths owned by OTHER posts
+        # in this feed) is what makes the minted filename collision-safe: for a
+        # same-title pair the canonical name is owned, so this post gets
+        # "<name>_<guid8>.mp3" instead of adopting the sibling's file.
+        taken_paths = other_post_processed_paths(post, self.db_session)
+        working_paths = get_post_processed_audio_path_cached(
+            post, feed_title, post_guid=post_guid, taken_paths=taken_paths
+        )
         if working_paths is None:
             raise ProcessorException("Processed audio path not found")
 
@@ -776,6 +811,12 @@ class PodcastProcessor:
         Check if processed audio already exists, either in database or on disk.
         Updates the database path if found on disk.
 
+        The on-disk probe is ownership-aware: when another post in the same
+        feed already owns the canonical same-title filename, this post looks
+        for its own ``_<guid8>`` variant instead of adopting the sibling's
+        file (adoption would silently skip processing and later serve or
+        delete the sibling's audio).
+
         Returns:
             True if processed audio exists and is valid, False otherwise
         """
@@ -798,11 +839,16 @@ class PodcastProcessor:
             if not result or not result.success:
                 raise RuntimeError(getattr(result, "error", "Failed to update post"))
 
-        # Check if file exists on disk at expected location
+        # Check if file exists on disk at expected location. This derivation
+        # keeps the historical post-title sanitizer (it can differ from
+        # paths_from_unprocessed_path for multi-word feed titles); the
+        # ownership filter is what prevents adopting a sibling's file.
         safe_feed_title = sanitize_title(post.feed.title)
         safe_post_title = sanitize_title(post.title)
-        expected_processed_path = (
-            get_srv_root() / safe_feed_title / f"{safe_post_title}.mp3"
+        expected_processed_path = disambiguate_processed_path(
+            get_srv_root() / safe_feed_title / f"{safe_post_title}.mp3",
+            post_guid=getattr(post, "guid", None),
+            taken_paths=other_post_processed_paths(post, self.db_session),
         )
 
         if (

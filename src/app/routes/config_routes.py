@@ -13,6 +13,7 @@ from app.config_store import read_combined, to_pydantic_config
 from app.processor import ProcessorSingleton
 from app.runtime_config import config as runtime_config
 from app.writer.client import writer_client
+from shared.llm_headers import llm_extra_headers
 from shared.llm_utils import model_uses_max_completion_tokens
 
 logger = logging.getLogger("global_logger")
@@ -479,6 +480,10 @@ def api_test_llm() -> flask.Response:
             completion_kwargs["max_completion_tokens"] = 1
         else:
             completion_kwargs["max_tokens"] = 1
+
+        # Same provider-specific headers the real pipeline sends, so a probe
+        # against OpenCode Go exercises the session-id path too.
+        completion_kwargs["headers"] = llm_extra_headers(base_url)
 
         _ = litellm.completion(**completion_kwargs)
 

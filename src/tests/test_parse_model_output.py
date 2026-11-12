@@ -90,3 +90,75 @@ def test_clean_parse_output_truncated_with_content_type() -> None:
         content_type="promotional_external",
         confidence=0.92,
     )
+
+
+def test_clean_parse_output_concatenated_objects() -> None:
+    """Duplicate-object shape seen 2026-10-03 (ModelCall 27122): the model
+    emitted the same JSON object twice back-to-back; json.loads rejects the
+    pair with "Extra data"."""
+    model_output = '{"ad_segments":[]}\n\n{"ad_segments":[]}'
+    result = clean_and_parse_model_output(model_output)
+    assert result == AdSegmentPredictionList(ad_segments=[])
+
+
+def test_clean_parse_output_swapped_bracket() -> None:
+    """Stray-paren shape seen 2026-10-03 (ModelCall 27441): a ')' after an
+    already-closed array."""
+    model_output = '{"ad_segments":[])'
+    result = clean_and_parse_model_output(model_output)
+    assert result == AdSegmentPredictionList(ad_segments=[])
+
+
+def test_clean_parse_output_camel_case_and_duplicate_keys() -> None:
+    """Mixed-key shape seen 2026-10-03 (ModelCall 28273): the model wrote
+    'adSegments', 'ad_segments' and 'ads' in one object, then repeated a
+    bare object. camelCase is normalized; duplicate keys resolve first-wins.
+    """
+    model_output = '{"adSegments":[],"ad_segments":[],"ads":[]}\n\n{"ad_segments":[]}'
+    result = clean_and_parse_model_output(model_output)
+    assert result == AdSegmentPredictionList(ad_segments=[])
+
+
+def test_clean_parse_output_camel_case_with_data_keeps_first() -> None:
+    """When duplicate keys conflict, the FIRST occurrence must win: a
+    response with data in 'adSegments' but an empty 'ad_segments' must not
+    silently lose the predictions to json.loads' last-wins semantics."""
+    model_output = (
+        '{"adSegments":[{"segment_offset":42.0,"confidence":0.8}],' '"ad_segments":[]}'
+    )
+    result = clean_and_parse_model_output(model_output)
+    assert result == AdSegmentPredictionList(
+        ad_segments=[AdSegmentPrediction(segment_offset=42.0, confidence=0.8)]
+    )
+
+
+def test_clean_parse_output_concatenated_with_data() -> None:
+    """Concatenated duplicate objects where only the first carries data:
+    the object with the most predictions must win."""
+    model_output = (
+        '{"adSegments":[{"segment_offset":42.0,"confidence":0.8}],'
+        '"ad_segments":[],"ads":[]}\n\n{"ad_segments":[]}'
+    )
+    result = clean_and_parse_model_output(model_output)
+    assert result == AdSegmentPredictionList(
+        ad_segments=[AdSegmentPrediction(segment_offset=42.0, confidence=0.8)]
+    )
+
+
+def test_clean_parse_output_string_values_with_structural_chars() -> None:
+    """Brackets/braces/parens inside string values are structural-noise for
+    the scanners and must be preserved untouched (paren in a phone number,
+    brace in prose)."""
+    model_output = (
+        '{"ad_segments": [], "note": "call (555) 123-4567 {ok}", ' '"confidence": 0.4}'
+    )
+    result = clean_and_parse_model_output(model_output)
+    assert result == AdSegmentPredictionList(ad_segments=[], confidence=0.4)
+
+
+def test_clean_parse_output_prose_with_unbalanced_brace_tail() -> None:
+    """Trailing prose containing an unclosed brace must not corrupt the
+    leading JSON object."""
+    model_output = '{"ad_segments": [], "confidence": 0.4} Some prose { unclosed'
+    result = clean_and_parse_model_output(model_output)
+    assert result == AdSegmentPredictionList(ad_segments=[], confidence=0.4)

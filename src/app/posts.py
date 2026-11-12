@@ -2,6 +2,9 @@ import logging
 from pathlib import Path
 from typing import Any, List, Optional
 
+from sqlalchemy.orm import object_session
+
+from app.extensions import db
 from app.models import Post
 from app.writer.client import writer_client
 from podcast_processor.podcast_downloader import get_and_make_download_path
@@ -9,14 +12,70 @@ from podcast_processor.podcast_downloader import get_and_make_download_path
 logger = logging.getLogger("global_logger")
 
 
+def other_post_processed_paths(
+    post: Post, db_session: Any | None = None
+) -> frozenset[str]:
+    """Return processed-audio paths claimed by *other* posts in the same feed.
+
+    Two posts that share a title derive the same processed filename, so the
+    path alone cannot tell "mine" from "theirs". ``shared.processing_paths``
+    deliberately has no DB access, so this ownership query is the
+    ``taken_paths`` signal its callers pass in.
+
+    Fails open (empty set) when the post has no feed/guid yet or the query
+    fails, which degrades to the pre-fix path derivation instead of breaking a
+    download or cleanup path.
+    """
+    feed_id = getattr(post, "feed_id", None)
+    guid = getattr(post, "guid", None)
+    if feed_id is None or not guid:
+        return frozenset()
+
+    session = db_session if db_session is not None else object_session(post)
+    if session is None:
+        session = db.session
+
+    try:
+        rows = (
+            session.query(Post.processed_audio_path)
+            .filter(
+                Post.feed_id == feed_id,
+                Post.guid != guid,
+                Post.processed_audio_path.isnot(None),
+            )
+            .all()
+        )
+    except Exception:  # pylint: disable=broad-except
+        logger.warning(
+            "Could not load processed audio paths for feed %s; "
+            "using legacy path derivation",
+            feed_id,
+            exc_info=True,
+        )
+        return frozenset()
+
+    return frozenset(str(row[0]) for row in rows if row[0])
+
+
 def _collect_processed_paths(post: Post) -> List[Path]:
-    """Collect all possible processed audio paths to check for a post."""
+    """Collect all possible processed audio paths to check for a post.
+
+    Every derived candidate (fallbacks 2-4) is filtered through the
+    ownership-aware disambiguation helper, so a same-title collision can never
+    hand ``remove_associated_files`` a path that belongs to another post.
+    """
     import re
 
     from podcast_processor.podcast_downloader import sanitize_title
-    from shared.processing_paths import get_srv_root, paths_from_unprocessed_path
+    from shared.processing_paths import (
+        disambiguate_processed_path,
+        get_srv_root,
+        paths_from_unprocessed_path,
+    )
 
     processed_paths_to_check: List[Path] = []
+    post_guid = getattr(post, "guid", None)
+    taken_paths = other_post_processed_paths(post)
 
     # 1. Check database path first (most reliable if set)
     if post.processed_audio_path:
@@ -25,7 +84,10 @@ def _collect_processed_paths(post: Post) -> List[Path]:
     # 2. Compute path using paths_from_unprocessed_path (matches processor logic)
     if post.unprocessed_audio_path and post.feed and post.feed.title:
         processing_paths = paths_from_unprocessed_path(
-            post.unprocessed_audio_path, post.feed.title
+            post.unprocessed_audio_path,
+            post.feed.title,
+            post_guid=post_guid,
+            taken_paths=taken_paths,
         )
         if processing_paths:
             processed_paths_to_check.append(processing_paths.post_processed_audio_path)
@@ -35,7 +97,11 @@ def _collect_processed_paths(post: Post) -> List[Path]:
         safe_feed_title = sanitize_title(post.feed.title)
         safe_post_title = sanitize_title(post.title)
         processed_paths_to_check.append(
-            get_srv_root() / safe_feed_title / f"{safe_post_title}.mp3"
+            disambiguate_processed_path(
+                get_srv_root() / safe_feed_title / f"{safe_post_title}.mp3",
+                post_guid=post_guid,
+                taken_paths=taken_paths,
+            )
         )
 
         # 4. Also check with underscore-style sanitization
@@ -43,7 +109,11 @@ def _collect_processed_paths(post: Post) -> List[Path]:
         sanitized_feed_title = sanitized_feed_title.rstrip(".")
         sanitized_feed_title = re.sub(r"\s+", "_", sanitized_feed_title)
         processed_paths_to_check.append(
-            get_srv_root() / sanitized_feed_title / f"{safe_post_title}.mp3"
+            disambiguate_processed_path(
+                get_srv_root() / sanitized_feed_title / f"{safe_post_title}.mp3",
+                post_guid=post_guid,
+                taken_paths=taken_paths,
+            )
         )
 
     return processed_paths_to_check
